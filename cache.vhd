@@ -46,7 +46,6 @@ architecture arch of cache is
   
   
   --Cache storage arrays 
-  
 	type data_array_type is array (0 to LINES-1) of line_type;
 	type tag_array_type is array (0 to LINES-1) of tag_type;
 	
@@ -105,7 +104,6 @@ architecture arch of cache is
 begin
 
 	--split the addresses
-	
 	addr_tag <= s_addr(14 downto 9);
 	addr_index <= unsigned(s_addr(8 downto 4));
 	addr_offset <= unsigned(s_addr(3 downto 2));
@@ -113,19 +111,16 @@ begin
 	
 	
 	--Read cache line and compute Hit
-	
 	line_q <= data_array(index_i);
 	tag_match <= '1' when tag_array(index_i) = addr_tag else '0';
 	hit <= valid_bit(index_i) and tag_match;
 	
 	
 	--Read datapath
-	
 	s_readdata <= get_word(line_q, addr_offset);
 	
 	
 	--Wite-hit datapath (update the cache storage on Write-Hit)
-	
 	process(clock) 
 		variable new_line : line_type;
 	begin 
@@ -144,8 +139,6 @@ begin
 		end if;
 	end if;
 end process;
-
-
 
 
 end arch;
