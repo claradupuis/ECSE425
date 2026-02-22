@@ -154,6 +154,7 @@ begin
 	process(s_addr,s_read,s_write,s_writedata,m_readdata,m_waitrequest)
 		variable new_line : line_type;
 	begin
+		-- https://excalidraw.com/#json=CmyTc7BcgbbeXJ421pLy5,vuiMduC28oUOa3ZPwbwgWA
 		case state is
 			when READY =>
 				if (s_read = '1') then
