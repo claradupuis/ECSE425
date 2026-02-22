@@ -1,11 +1,9 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use IEEE.std_logic_unsigned.all;
 
 entity cache is
-generic(
-	ram_size : INTEGER := 32768;
-);
 port(
 	clock : in std_logic;
 	reset : in std_logic;
@@ -16,22 +14,22 @@ port(
 	s_write : in std_logic;
 	s_writedata : in std_logic_vector (31 downto 0);
 	m_readdata : in std_logic_vector (7 downto 0);
-	m_waitrequest : in std_logic
+	m_waitrequest : in std_logic;
 
 
 	s_waitrequest : out std_logic;
 	s_readdata : out std_logic_vector (31 downto 0);
-	m_addr : out integer range 0 to ram_size-1;
+	m_addr : out integer range 0 to 32768-1;
 	m_read : out std_logic;
 	m_write : out std_logic;
-	m_writedata : out std_logic_vector (7 downto 0);
+	m_writedata : out std_logic_vector (7 downto 0)
 );
 end cache;
 
 architecture arch of cache is
 
 
-	type state_type is (READY, READ_ACK, READ_RETURN, MEM_WRITE, MEM_WRITE_DONE, MEM_READ, WRITE_INTERNAL_DIRTY, MEM_WRITE_WAIT, MEM_READ_WAIT, WRITE_COMPLETE);
+	type state_type is (READY, READ_RETURN, MEM_WRITE, MEM_READ, MEM_WRITE_LOOP, MEM_READ_LOOP, WRITE_COMPLETE, WRITE_MEM_READ, WRITE_MEM_READ_LOOP, WRITE_MEM_WRITE, WRITE_MEM_WRITE_LOOP, READ_COMPLETE);
 	signal state : state_type;
 	signal next_state : state_type;
 
@@ -105,14 +103,32 @@ architecture arch of cache is
 		return l;
 	end function;
 
+	function set_byte(
+		line_in : line_type;
+		offset_word : unsigned(OFFSET_BITS-1 downto 0);
+		offset_byte : unsigned(OFFSET_BITS-1 downto 0);
+		data : std_logic_vector(7 downto 0)
+	) return line_type is
+		variable l : line_type := line_in;
+		variable start_bit: integer;
+		variable stop_bit : integer;
+	begin
+		start_bit := to_integer(offset_word) * WORD_BITS + to_integer(offset_byte) * 8;
+		stop_bit := start_bit + 8 - 1;
+		l(stop_bit downto start_bit) := data;
+		return l;
+	end function;
 
+	variable loop_index_write : integer range 0 to 3 := 0;
+	variable loop_index_read : integer range 0 to 3 := 0;
 
 begin
 
+
 	--split the addresses
-	addr_tag <= addr(14 downto 9);
-	addr_index <= unsigned(addr(8 downto 4));
-	addr_offset <= unsigned(addr(3 downto 2));
+	addr_tag <= s_addr(14 downto 9);
+	addr_index <= unsigned(s_addr(8 downto 4));
+	addr_offset <= unsigned(s_addr(3 downto 2));
 	index_i <= to_integer(addr_index);
 
 
@@ -128,10 +144,11 @@ begin
 			--mark lines invalid and clean
 			valid_bit <= (others => '0');
 			dirty_bit <= (others => '0');
-		elsif (clk'event and clk = '1') then
+		elsif (clock'event and clock = '1') then
 			state <= next_state;
 		end if;
 	end process;
+
 
 	--Wite-hit datapath (update the cache storage on Write-Hit)
 	process(s_addr,s_read,s_write,s_writedata,m_readdata,m_waitrequest)
@@ -139,16 +156,45 @@ begin
 	begin
 		case state is
 			when READY =>
-				if (s_read = '1') and (hit = '1') then
-					next_state <= READ_RETURN;
-				elsif (s_read = '1') and (hit = '0') then
-					if (valid_bit(index_i) == '0') then
-						next_state <= MEM_READ;
-					else
-						next_state <= MEM_WRITE;
+				if (s_read = '1') then
+					-- valid && clean/dirty && match
+					if (hit = '1') then
+						next_state <= READ_RETURN;
+					-- invalid/miss
+					elsif (hit = '0') then
+						-- dirty
+						if (dirty_bit(index_i) = '1') then
+							next_state <= MEM_WRITE;
+						-- clean || invalid (invalid bit cannot be dirty)
+						else
+							next_state <= MEM_READ;
+						end if;
 					end if;
+					s_waitrequest <= '1';
 				elsif s_write = '1' then
-					next_state <= WRITE_INTERNAL_DIRTY;
+					-- valid && match
+					if (hit = '1') then
+						-- write with dirty bit to 1
+						new_line := set_word(data_array(index_i), addr_offset, s_writedata);
+						data_array(index_i) <= new_line;
+						dirty_bit(index_i) <= '1';
+						s_waitrequest <= '0';
+
+						next_state <= WRITE_COMPLETE;
+
+					-- (invalid || miss) && clean
+					elsif (dirty_bit(index_i) = '0') then
+						-- read into memory then write on top, no need to write back whats there
+						next_state <= WRITE_MEM_READ;
+						s_waitrequest <= '1';
+
+					-- (invalid || miss) && dirty
+					elsif (dirty_bit(index_i) = '1') then
+						-- write back what is already there then read in new info
+						next_state <= WRITE_MEM_WRITE;
+						s_waitrequest <= '1';
+
+					end if;
 				else
 					s_waitrequest <= '0';
 				end if;
@@ -157,39 +203,88 @@ begin
 				s_waitrequest <= '0';
 				s_readdata <= get_word(line_q, addr_offset);
 				if (s_read = '0') then
-					next_state <= READY;
+					next_state <= READ_COMPLETE;
 				end if;
 
 			when MEM_WRITE =>
-				m_addr <= addr_tag & addr_index & addr_offset;
-				m_writedata <= get_word(line_q, addr_offset);
-				next_state <= MEM_WRITE_WAIT;
+				m_addr <= to_integer(unsigned(std_logic_vector(tag_array(index_i)) & std_logic_vector(addr_index) & std_logic_vector(addr_offset) & std_logic_vector(loop_index_write)));
+				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
+				m_write <= '1';
+				next_state <= MEM_WRITE_LOOP;
 
-			when MEM_WRITE_WAIT =>
+			when MEM_WRITE_LOOP =>
 				if (m_waitrequest = '0') then
 					m_write <= '0';
-					next_state <= MEM_READ;
+					if (loop_index_write = 3) then
+						loop_index_write := 0;
+						next_state <= MEM_READ;
+					else
+						loop_index_write := loop_index_write + 1;
+						next_state <= MEM_WRITE;
+					end if;
 				end if;
 
 			when MEM_READ =>
-				m_addr <= s_addr;
+				m_addr <= addr_tag & addr_index & addr_offset & loop_index_read;
 				m_read <= '1';
-				next_state <= MEM_READ_WAIT;
+				next_state <= MEM_READ_LOOP;
 
-			when MEM_READ_WAIT =>
+			when MEM_READ_LOOP =>
 				if (m_waitrequest = '0') then
-					set_word(data_array(index_i), addr_offset, s_writedata);
+					m_read <= '0';
+					new_line := set_byte(data_array(index_i), addr_offset, loop_index_read, m_readdata);
 					data_array(index_i) <= new_line;
 					dirty_bit(index_i) <= '0';
-					next_state <= READ_RETURN
+					if (loop_index_read = 3) then
+						loop_index_read := 0;
+						next_state <= READ_RETURN;
+					else
+						loop_index_read := loop_index_read + 1;
+						next_state <= MEM_READ;
 				end if;
 
-			when WRITE_INTERNAL_DIRTY =>
-				new_line := set_word(data_array(index_i), addr_offset, s_writedata);
-				data_array(index_i) <= new_line;
-				dirty_bit(index_i) <= '1';
-				s_waitrequest <= '0'
-				next_state <= WRITE_COMPLETE;
+			when WRITE_MEM_WRITE =>
+				m_addr <= tag_array(index_i) & addr_index & addr_offset & (loop_index_write / 8;
+				m_writedata <= get_word(line_q, addr_offset)(loop_index_write + 7 downto loop_index_write * 8);
+				m_write <= '1';
+				next_state <= MEM_WRITE_LOOP;
+
+			when WRITE_MEM_WRITE_LOOP =>
+				if (m_waitrequest = '0') then
+					m_write <= '0';
+					if (loop_index_write = 3) then
+						loop_index_write := 0;
+						next_state <= MEM_READ;
+					else
+						loop_index_write := loop_index + 8;
+						next_state <= MEM_WRITE;
+					end if;
+				end if;
+
+
+			when WRITE_MEM_READ =>
+				m_addr <= addr_tag & addr_index & addr_offset & (loop_index / 8);
+				m_read <= '1';
+				next_state <= MEM_READ_LOOP;
+
+			when WRITE_MEM_READ_LOOP =>
+				if (m_waitrequest = '0') then
+					m_read <= '0';
+					new_line := set_byte(data_array(index_i), addr_offset, loop_index_read, m_readdata);
+					data_array(index_i) <= new_line;
+					dirty_bit(index_i) <= '0';
+					if (loop_index_read = 3) then
+						loop_index_read := 0;
+
+						new_line := set_word(data_array(index_i), addr_offset, s_writedata);
+						data_array(index_i) <= new_line;
+						dirty_bit(index_i) <= '1';
+						s_waitrequest <= '0';
+
+						next_state <= WRITE_COMPLETE;
+					else
+						next_state <= WRITE_MEM_READ;
+				end if;
 
 			when WRITE_COMPLETE =>
 				next_state <= READY
