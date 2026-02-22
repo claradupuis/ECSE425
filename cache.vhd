@@ -244,7 +244,7 @@ begin
 				end if;
 
 			when WRITE_MEM_WRITE =>
-				m_addr <= tag_array(index_i) & addr_index & addr_offset & (loop_index_write / 8;
+				m_addr <= tag_array(index_i) & addr_index & addr_offset & (loop_index_write / 8);
 				m_writedata <= get_word(line_q, addr_offset)(loop_index_write + 7 downto loop_index_write * 8);
 				m_write <= '1';
 				next_state <= MEM_WRITE_LOOP;
