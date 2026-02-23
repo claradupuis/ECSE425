@@ -119,8 +119,7 @@ architecture arch of cache is
 		return l;
 	end function;
 
-	variable loop_index_write : integer range 0 to 3 := 0;
-	variable loop_index_read : integer range 0 to 3 := 0;
+
 
 begin
 
@@ -153,8 +152,11 @@ begin
 	--Wite-hit datapath (update the cache storage on Write-Hit)
 	process(s_addr,s_read,s_write,s_writedata,m_readdata,m_waitrequest)
 		variable new_line : line_type;
+		variable loop_index_write : integer range 0 to 3 := 0;
+		variable loop_index_read : integer range 0 to 3 := 0;
 	begin
 		-- https://excalidraw.com/#json=CmyTc7BcgbbeXJ421pLy5,vuiMduC28oUOa3ZPwbwgWA
+		
 		case state is
 			when READY =>
 				if (s_read = '1') then
@@ -208,7 +210,7 @@ begin
 				end if;
 
 			when MEM_WRITE =>
-				m_addr <= to_integer(unsigned(std_logic_vector(tag_array(index_i)) & std_logic_vector(addr_index) & std_logic_vector(addr_offset) & std_logic_vector(loop_index_write)));
+				m_addr <= to_integer(unsigned(tag_array(index_i)) & (addr_index) & (addr_offset) & to_unsigned(loop_index_write,2));
 				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
 				m_write <= '1';
 				next_state <= MEM_WRITE_LOOP;
@@ -226,14 +228,14 @@ begin
 				end if;
 
 			when MEM_READ =>
-				m_addr <= addr_tag & addr_index & addr_offset & loop_index_read;
+				m_addr <= to_integer(unsigned(addr_tag) & addr_index & addr_offset & to_unsigned(loop_index_read,2));
 				m_read <= '1';
 				next_state <= MEM_READ_LOOP;
 
 			when MEM_READ_LOOP =>
 				if (m_waitrequest = '0') then
 					m_read <= '0';
-					new_line := set_byte(data_array(index_i), addr_offset, loop_index_read, m_readdata);
+					new_line := set_byte(data_array(index_i), addr_offset, to_unsigned(loop_index_read,2), m_readdata);
 					data_array(index_i) <= new_line;
 					dirty_bit(index_i) <= '0';
 					if (loop_index_read = 3) then
@@ -242,10 +244,11 @@ begin
 					else
 						loop_index_read := loop_index_read + 1;
 						next_state <= MEM_READ;
+					end if;
 				end if;
 
 			when WRITE_MEM_WRITE =>
-				m_addr <= tag_array(index_i) & addr_index & addr_offset & (loop_index_write / 8);
+				m_addr <= to_integer(unsigned(tag_array(index_i)) & addr_index & addr_offset & to_unsigned((loop_index_write / 8),2));
 				m_writedata <= get_word(line_q, addr_offset)(loop_index_write + 7 downto loop_index_write * 8);
 				m_write <= '1';
 				next_state <= MEM_WRITE_LOOP;
@@ -257,21 +260,21 @@ begin
 						loop_index_write := 0;
 						next_state <= MEM_READ;
 					else
-						loop_index_write := loop_index + 8;
+						loop_index_write := loop_index_write + 8;
 						next_state <= MEM_WRITE;
 					end if;
 				end if;
 
 
 			when WRITE_MEM_READ =>
-				m_addr <= addr_tag & addr_index & addr_offset & (loop_index / 8);
+				m_addr <= to_integer(unsigned(addr_tag) & addr_index & addr_offset & to_unsigned((loop_index_read / 8),2));
 				m_read <= '1';
 				next_state <= MEM_READ_LOOP;
 
 			when WRITE_MEM_READ_LOOP =>
 				if (m_waitrequest = '0') then
 					m_read <= '0';
-					new_line := set_byte(data_array(index_i), addr_offset, loop_index_read, m_readdata);
+					new_line := set_byte(data_array(index_i), addr_offset, to_unsigned(loop_index_read,2), m_readdata);
 					data_array(index_i) <= new_line;
 					dirty_bit(index_i) <= '0';
 					if (loop_index_read = 3) then
@@ -286,11 +289,13 @@ begin
 					else
 						next_state <= WRITE_MEM_READ;
 				end if;
+				end if;
 
 			when WRITE_COMPLETE =>
-				next_state <= READY
-		end if;
-	end if;
+				next_state <= READY;
+			when others=>
+
+			end case;
 end process;
 
 
