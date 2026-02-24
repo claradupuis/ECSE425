@@ -293,6 +293,8 @@ begin
 
 			when WRITE_COMPLETE =>
 				next_state <= READY;
+			when READ_COMPLETE =>
+				next_state <= READY;
 			when others=>
 
 			end case;

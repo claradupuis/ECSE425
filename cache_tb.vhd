@@ -9,7 +9,7 @@ architecture behavior of cache_tb is
 
 component cache is
 generic(
-    ram_size : INTEGER := 32768;
+    ram_size : INTEGER := 32768
 );
 port(
     clock : in std_logic;
@@ -115,7 +115,49 @@ end process;
 test_process : process
 begin
 
--- put your tests here
+-- init
+s_addr      <= (others => '0');
+s_read      <= '0';
+s_write     <= '0';
+s_writedata <= (others => '0');
+
+reset <= '1';
+wait for 2*clk_period;
+reset <= '0';
+wait until rising_edge(clk);
+
+-- WRITE 0x11111111 to addr 1
+s_addr      <= X"00000001";
+s_writedata <= X"11111111";
+s_write     <= '1';
+s_read      <= '0';
+
+-- wait for acceptance
+ wait until rising_edge(clk) and s_waitrequest = '0';
+
+-- deassert after accepted
+s_write <= '0';
+wait until rising_edge(clk);
+
+-- READ addr 1
+s_addr  <= X"00000001";
+s_read  <= '1';
+s_write <= '0';
+
+-- wait for read to be accepted
+--wait until rising_edge(clk) and s_waitrequest = '0';
+
+-- deassert read after accepted
+s_read <= '0';
+
+-- NOW wait a cycle (or more) for data to show up
+-- minimum safe: wait 1 rising edge, then check
+wait until rising_edge(clk);
+
+assert s_readdata = X"11111111"
+  report "Readback mismatch"
+  severity failure;
+
 	
 end process;
 	
