@@ -69,6 +69,9 @@ architecture arch of cache is
 	signal hit : std_logic; -- 0 or 1
 	signal tag_match : std_logic;
 
+	signal loop_index_write : integer range 0 to 3 := 0;
+	signal loop_index_read : integer range 0 to 3 := 0;
+
 
 	-- Helper Function to extract one 32-bit word from a 128-bit cache line
 	function get_word(
@@ -136,24 +139,78 @@ begin
 	tag_match <= '1' when tag_array(index_i) = addr_tag else '0';
 	hit <= valid_bit(index_i) and tag_match;
 
-	process (clock, reset)
-	begin
-		if reset = '1' then
-			state <= READY;
-			--mark lines invalid and clean
-			valid_bit <= (others => '0');
-			dirty_bit <= (others => '0');
-		elsif (clock'event and clock = '1') then
-			state <= next_state;
-		end if;
-	end process;
+process (clock, reset)
+begin
+    if reset = '1' then
+        state            <= READY;
+        valid_bit        <= (others => '0');
+        dirty_bit        <= (others => '0');
+        loop_index_write <= 0;
+        loop_index_read  <= 0;
+
+    elsif (clock'event and clock = '1') then
+        state <= next_state;
+
+        -- MEM_WRITE_LOOP: dirty writeback during a read-miss
+        if state = MEM_WRITE_LOOP and m_waitrequest = '0' then
+            if loop_index_write = 3 then
+                loop_index_write <= 0;
+            else
+                loop_index_write <= loop_index_write + 1;
+            end if;
+        end if;
+
+        -- MEM_READ_LOOP: cache-line fill during a read-miss
+        if state = MEM_READ_LOOP and m_waitrequest = '0' then
+            if loop_index_read = 3 then
+                loop_index_read <= 0;
+            else
+                loop_index_read <= loop_index_read + 1;
+            end if;
+        end if;
+
+	-- MEM_READ_LOOP: update valid bit and tags after read miss fill
+	if state = MEM_READ_LOOP and m_waitrequest = '0' and loop_index_read = 3 then
+		valid_bit(index_i) <= '1';
+		tag_array(index_i) <= addr_tag;
+	end if;
+
+        -- WRITE_MEM_WRITE_LOOP: dirty writeback during a write-miss
+        if state = WRITE_MEM_WRITE_LOOP and m_waitrequest = '0' then
+            if loop_index_write = 3 then
+                loop_index_write <= 0;
+            else
+                loop_index_write <= loop_index_write + 1;
+            end if;
+        end if;
+
+        -- WRITE_MEM_READ_LOOP: cache-line fill during a write-miss
+        if state = WRITE_MEM_READ_LOOP and m_waitrequest = '0' then
+            if loop_index_read = 3 then
+                loop_index_read <= 0;
+            else
+                loop_index_read <= loop_index_read + 1;
+            end if;
+        end if;
+
+	-- WRITE_MEM_READ_LOOP: update valid bit and tags after write miss fill
+
+	if state = WRITE_MEM_READ_LOOP and m_waitrequest = '0' and loop_index_read = 3 then
+		valid_bit(index_i) <= '1';
+		tag_array(index_i) <= addr_tag;
+	end if; 
+
+    end if;
+end process;
 
 
 	--Wite-hit datapath (update the cache storage on Write-Hit)
-	process(s_addr,s_read,s_write,s_writedata,m_readdata,m_waitrequest)
+	process(state, s_addr, s_read, s_write, s_writedata, m_readdata, m_waitrequest,
+        hit, dirty_bit, line_q, data_array, tag_array,
+        addr_tag, addr_index, addr_offset, index_i,
+        loop_index_write, loop_index_read)
 		variable new_line : line_type;
-		variable loop_index_write : integer range 0 to 3 := 0;
-		variable loop_index_read : integer range 0 to 3 := 0;
+		
 	begin
 		-- https://excalidraw.com/#json=CmyTc7BcgbbeXJ421pLy5,vuiMduC28oUOa3ZPwbwgWA
 		
@@ -182,7 +239,6 @@ begin
 						data_array(index_i) <= new_line;
 						dirty_bit(index_i) <= '1';
 						s_waitrequest <= '0';
-
 						next_state <= WRITE_COMPLETE;
 
 					-- (invalid || miss) && clean
@@ -210,7 +266,7 @@ begin
 				end if;
 
 			when MEM_WRITE =>
-				m_addr <= to_integer(unsigned(tag_array(index_i)) & (addr_index) & (addr_offset) & to_unsigned(loop_index_write,2));
+				m_addr <= to_integer(unsigned(tag_array(index_i)) & (addr_index) & (addr_offset) & to_unsigned(loop_index_write,4));
 				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
 				m_write <= '1';
 				next_state <= MEM_WRITE_LOOP;
@@ -219,10 +275,10 @@ begin
 				if (m_waitrequest = '0') then
 					m_write <= '0';
 					if (loop_index_write = 3) then
-						loop_index_write := 0;
+						
 						next_state <= MEM_READ;
 					else
-						loop_index_write := loop_index_write + 1;
+						
 						next_state <= MEM_WRITE;
 					end if;
 				end if;
@@ -239,29 +295,25 @@ begin
 					data_array(index_i) <= new_line;
 					dirty_bit(index_i) <= '0';
 					if (loop_index_read = 3) then
-						loop_index_read := 0;
 						next_state <= READ_RETURN;
 					else
-						loop_index_read := loop_index_read + 1;
 						next_state <= MEM_READ;
 					end if;
 				end if;
 
 			when WRITE_MEM_WRITE =>
 				m_addr <= to_integer(unsigned(tag_array(index_i)) & addr_index & addr_offset & to_unsigned((loop_index_write / 8),2));
-				m_writedata <= get_word(line_q, addr_offset)(loop_index_write + 7 downto loop_index_write * 8);
+				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
 				m_write <= '1';
-				next_state <= MEM_WRITE_LOOP;
+				next_state <= WRITE_MEM_WRITE_LOOP;
 
 			when WRITE_MEM_WRITE_LOOP =>
 				if (m_waitrequest = '0') then
 					m_write <= '0';
 					if (loop_index_write = 3) then
-						loop_index_write := 0;
 						next_state <= MEM_READ;
 					else
-						loop_index_write := loop_index_write + 8;
-						next_state <= MEM_WRITE;
+						next_state <= WRITE_MEM_WRITE;
 					end if;
 				end if;
 
@@ -269,7 +321,7 @@ begin
 			when WRITE_MEM_READ =>
 				m_addr <= to_integer(unsigned(addr_tag) & addr_index & addr_offset & to_unsigned((loop_index_read / 8),2));
 				m_read <= '1';
-				next_state <= MEM_READ_LOOP;
+				next_state <= WRITE_MEM_READ_LOOP;
 
 			when WRITE_MEM_READ_LOOP =>
 				if (m_waitrequest = '0') then
@@ -278,8 +330,6 @@ begin
 					data_array(index_i) <= new_line;
 					dirty_bit(index_i) <= '0';
 					if (loop_index_read = 3) then
-						loop_index_read := 0;
-
 						new_line := set_word(data_array(index_i), addr_offset, s_writedata);
 						data_array(index_i) <= new_line;
 						dirty_bit(index_i) <= '1';
@@ -296,9 +346,6 @@ begin
 			when READ_COMPLETE =>
 				next_state <= READY;
 			when others=>
-
 			end case;
 end process;
-
-
 end arch;
