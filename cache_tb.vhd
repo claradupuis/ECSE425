@@ -126,39 +126,43 @@ wait for 2*clk_period;
 reset <= '0';
 wait until rising_edge(clk);
 
--- WRITE 0x11111111 to addr 1
-s_addr      <= X"00000001";
-s_writedata <= X"11111111";
-s_write     <= '1';
-s_read      <= '0';
+-- TEST CASE 1: WRITE -> READ MISS ---
+    -- Step 1: Seed cache
+    s_addr      <= X"00000001";
+    s_write     <= '1'; 
+    s_read      <= '0';
+    s_writedata <= X"11111111";
 
--- wait for acceptance
- wait until rising_edge(clk) and s_waitrequest = '0';
+    wait until rising_edge(clk);
+    wait until rising_edge(clk) and s_waitrequest = '0';
+    s_write <= '0';
+    wait until rising_edge(clk);
 
--- deassert after accepted
-s_write <= '0';
-wait until rising_edge(clk);
+    -- Step 2: Read from address 1
+    s_addr  <= X"00000000";
+    s_read  <= '1';
+    s_write <= '0';
 
--- READ addr 1
-s_addr  <= X"00000001";
-s_read  <= '1';
-s_write <= '0';
+    wait until rising_edge(clk);
 
--- wait for read to be accepted
---wait until rising_edge(clk) and s_waitrequest = '0';
+    -- wait for read miss to complete (cache fetches from memory)
+    loop
+	wait until rising_edge(clk);
+	exit when s_waitrequest = '0';
+    end loop;
 
--- deassert read after accepted
-s_read <= '0';
+    -- deassert read, idle cycle
+    s_read <= '0';
+    wait until rising_edge(clk);
 
--- NOW wait a cycle (or more) for data to show up
--- minimum safe: wait 1 rising edge, then check
-wait until rising_edge(clk);
+    assert s_readdata = X"11111111" report "FAIL: Read miss returned wrong data" severity failure;
 
-assert s_readdata = X"11111111"
-  report "Readback mismatch"
-  severity failure;
+-- TEST CASE 2: 
 
-	
+REPORT "TEST FINISHED";
+
+WAIT;
+
 end process;
 	
 end;
