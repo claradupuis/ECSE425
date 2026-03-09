@@ -68,6 +68,49 @@ signal m_write : std_logic;
 signal m_writedata : std_logic_vector (7 downto 0);
 signal m_waitrequest : std_logic; 
 
+procedure do_read (
+        signal clk_s: in  std_logic;
+        signal s_addr_s: out std_logic_vector(31 downto 0);
+        signal s_read_s: out std_logic;
+        signal s_write_s: out std_logic;
+        signal s_waitrequest_s: in std_logic;
+        constant addr: in  std_logic_vector(31 downto 0)
+    ) is
+    begin
+        s_addr_s  <= addr;
+        s_read_s  <= '1';
+        s_write_s <= '0';
+        -- Wait until the cache de-asserts waitrequest (transaction complete)
+        wait until rising_edge(clk_s) and s_waitrequest_s = '0';
+        -- De-assert read for one cycle before next transaction
+        s_read_s  <= '0';
+        wait until rising_edge(clk_s);
+end procedure;
+
+procedure do_write (
+	signal clk_s: in  std_logic;
+        signal s_addr_s: out std_logic_vector(31 downto 0);
+        signal s_read_s: out std_logic;
+        signal s_write_s: out std_logic;
+	signal s_writedata_s: out std_logic_vector(31 downto 0);
+        signal s_waitrequest_s: in std_logic;
+        constant addr: in  std_logic_vector(31 downto 0);
+	constant data: in std_logic_vector(31 downto 0) 
+    ) is
+    begin
+        s_addr_s  <= addr;
+        s_read_s  <= '0';
+        s_write_s <= '1';
+	s_writedata_s <= data;
+        -- Wait until the cache de-asserts waitrequest (transaction complete)
+        wait until rising_edge(clk_s) and s_waitrequest_s = '0';
+        -- De-assert read for one cycle before next transaction
+        s_write_s  <= '0';
+        wait until rising_edge(clk_s);
+end procedure;
+
+
+
 begin
 
 -- Connect the components which we instantiated above to their
@@ -115,49 +158,39 @@ end process;
 test_process : process
 begin
 
--- init
-s_addr      <= (others => '0');
-s_read      <= '0';
-s_write     <= '0';
-s_writedata <= (others => '0');
-
-reset <= '1';
-wait for 2*clk_period;
-reset <= '0';
-wait until rising_edge(clk);
-
--- TEST CASE 1: WRITE -> READ MISS ---
-    -- Step 1: Seed cache
-    s_addr      <= X"00000001";
-    s_write     <= '1'; 
+-- INIT --
+    s_addr      <= (others => '0');
     s_read      <= '0';
-    s_writedata <= X"11111111";
+    s_write     <= '0';
+    s_writedata <= (others => '0');
 
-    wait until rising_edge(clk);
-    wait until rising_edge(clk) and s_waitrequest = '0';
-    s_write <= '0';
-    wait until rising_edge(clk);
-
-    -- Step 2: Read from address 1
-    s_addr  <= X"00000000";
-    s_read  <= '1';
-    s_write <= '0';
-
+    reset <= '1';
+    wait for 2*clk_period;
+    reset <= '0';
     wait until rising_edge(clk);
 
-    -- wait for read miss to complete (cache fetches from memory)
-    loop
-	wait until rising_edge(clk);
-	exit when s_waitrequest = '0';
-    end loop;
-
-    -- deassert read, idle cycle
-    s_read <= '0';
-    wait until rising_edge(clk);
-
+-- TEST CASE 1: READ MISS ---
+    -- Step 1: Seed cache
+    do_write(clk, s_addr, s_read, s_write, s_writedata, s_waitrequest, X"00000001", X"11111111");
+    do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000001");
     assert s_readdata = X"11111111" report "FAIL: Read miss returned wrong data" severity failure;
 
--- TEST CASE 2: 
+    wait until rising_edge(clk);
+
+-- TEST CASE 2: (Read, hit) -> (Read, miss)
+    do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000001");
+    do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000081");
+    do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000001");
+
+    assert s_readdata = X"11111111" report "FAIL: Data corrupted after eviction and re-fetch" severity failure;
+    
+    wait until rising_edge(clk);
+
+-- TEST CASE 3: (Write, hit) -> (Read, hit)
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000001");
+   do_write(clk, s_addr, s_read, s_write, s_writedata, s_waitrequest, X"00000001", X"10101010");
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000001");
+   assert s_readdata = X"10101010" report "FAIL: Write hit did not update cache" severity failure;
 
 REPORT "TEST FINISHED";
 
