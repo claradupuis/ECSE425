@@ -192,6 +192,41 @@ begin
    do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000001");
    assert s_readdata = X"10101010" report "FAIL: Write hit did not update cache" severity failure;
 
+    wait until rising_edge(clk);
+
+-- TEST CASE 4: (Write, miss on invalid) -> (Read, hit)
+   do_write(clk, s_addr, s_read, s_write, s_writedata, s_waitrequest, X"00000010", X"AAAAAAAA");
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000010");
+   assert s_readdata = X"AAAAAAAA" report "FAIL: Write miss on invalid did not store data" severity failure;
+
+    wait until rising_edge(clk);
+
+-- TEST CASE 5: (Read, miss clean) -> (Write, miss clean) -> (Read, hit)
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000020");
+   do_write(clk, s_addr, s_read, s_write, s_writedata, s_waitrequest, X"00000220", X"BBBBBBBB");
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000220");
+   assert s_readdata = X"BBBBBBBB" report "FAIL: Write miss on clean line did not store data" severity failure;
+
+    wait until rising_edge(clk);
+
+-- TEST CASE 6: (Read, miss clean) -> (Write, hit) -> (Read, miss dirty) -> (Read, hit)
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000030");
+   do_write(clk, s_addr, s_read, s_write, s_writedata, s_waitrequest, X"00000030", X"CCCCCCCC");
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000230");
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000030");
+   assert s_readdata = X"CCCCCCCC" report "FAIL: Dirty read miss did not write back data" severity failure;
+
+    wait until rising_edge(clk);
+
+-- TEST CASE 7: (Read, miss clean) -> (Write, hit) -> (Write, miss dirty) -> (Read, hit)
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000040");
+   do_write(clk, s_addr, s_read, s_write, s_writedata, s_waitrequest, X"00000040", X"DDDDDDDD");
+   do_write(clk, s_addr, s_read, s_write, s_writedata, s_waitrequest, X"00000240", X"EEEEEEEE");
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000240");
+   assert s_readdata = X"EEEEEEEE" report "FAIL: Dirty write miss did not store new data" severity failure;
+   do_read(clk, s_addr, s_read, s_write, s_waitrequest, X"00000040");
+   assert s_readdata = X"DDDDDDDD" report "FAIL: Dirty write miss did not write back old data" severity failure;
+
 REPORT "TEST FINISHED";
 
 WAIT;

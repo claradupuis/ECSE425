@@ -4,6 +4,9 @@ use ieee.numeric_std.all;
 use IEEE.std_logic_unsigned.all;
 
 entity cache is
+generic (
+ram_size : integer := 32768
+);
 port(
 	clock : in std_logic;
 	reset : in std_logic;
