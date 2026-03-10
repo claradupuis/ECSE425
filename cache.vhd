@@ -1,6 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use IEEE.std_logic_unsigned.all;
 
 entity cache is
 generic (
@@ -268,10 +269,12 @@ end process;
 			when READ_RETURN =>
 				s_waitrequest <= '0';
 				s_readdata <= get_word(line_q, addr_offset);
-				next_state <= READ_COMPLETE;
+				if (s_read = '0') then
+					next_state <= READ_COMPLETE;
+				end if;
 
 			when MEM_WRITE =>
-				m_addr <= to_integer(unsigned(tag_array(index_i) & std_logic_vector(addr_index) & std_logic_vector(addr_offset) & std_logic_vector(to_unsigned(loop_index_write,2))));
+				m_addr <= to_integer(unsigned(tag_array(index_i)) & (addr_index) & (addr_offset) & to_unsigned(loop_index_write,4));
 				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
 				m_write <= '1';
 				next_state <= MEM_WRITE_LOOP;
@@ -289,7 +292,7 @@ end process;
 				end if;
 
 			when MEM_READ =>
-				m_addr <= to_integer(unsigned(addr_tag & std_logic_vector(addr_index) & std_logic_vector(addr_offset) & std_logic_vector(to_unsigned(loop_index_read,2))));
+				m_addr <= to_integer(unsigned(addr_tag) & addr_index & addr_offset & to_unsigned(loop_index_read,2));
 				m_read <= '1';
 				next_state <= MEM_READ_LOOP;
 
@@ -307,7 +310,7 @@ end process;
 				end if;
 
 			when WRITE_MEM_WRITE =>
-				m_addr <= to_integer(unsigned(tag_array(index_i) & std_logic_vector(addr_index) & std_logic_vector(addr_offset) & std_logic_vector(to_unsigned(loop_index_write,2))));
+				m_addr <= to_integer(unsigned(tag_array(index_i)) & addr_index & addr_offset & to_unsigned((loop_index_write / 8),2));
 				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
 				m_write <= '1';
 				next_state <= WRITE_MEM_WRITE_LOOP;
@@ -324,7 +327,7 @@ end process;
 
 
 			when WRITE_MEM_READ =>
-				m_addr <= to_integer(unsigned(addr_tag & std_logic_vector(addr_index) & std_logic_vector(addr_offset) & std_logic_vector(to_unsigned(loop_index_read,2))));
+				m_addr <= to_integer(unsigned(addr_tag) & addr_index & addr_offset & to_unsigned((loop_index_read / 8),2));
 				m_read <= '1';
 				next_state <= WRITE_MEM_READ_LOOP;
 
