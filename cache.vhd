@@ -1,359 +1,299 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
-use IEEE.std_logic_unsigned.all;
 
 entity cache is
 generic (
-ram_size : integer := 32768
+    ram_size : integer := 32768
 );
+
 port(
-	clock : in std_logic;
-	reset : in std_logic;
+    clock : in std_logic;
+    reset : in std_logic;
 
-	-- Avalon interface --
-	s_addr : in std_logic_vector (31 downto 0);
-	s_read : in std_logic;
-	s_write : in std_logic;
-	s_writedata : in std_logic_vector (31 downto 0);
-	m_readdata : in std_logic_vector (7 downto 0);
-	m_waitrequest : in std_logic;
+    -- Avalon interface --
+    s_addr : in std_logic_vector (31 downto 0);
+    s_read : in std_logic;
+    s_write : in std_logic;
+    s_writedata : in std_logic_vector (31 downto 0);
+    m_readdata : in std_logic_vector (7 downto 0);
+    m_waitrequest : in std_logic;
 
-
-	s_waitrequest : out std_logic;
-	s_readdata : out std_logic_vector (31 downto 0);
-	m_addr : out integer range 0 to 32768-1;
-	m_read : out std_logic;
-	m_write : out std_logic;
-	m_writedata : out std_logic_vector (7 downto 0)
+    s_waitrequest : out std_logic;
+    s_readdata : out std_logic_vector (31 downto 0);
+    m_addr : out integer range 0 to ram_size-1;
+    m_read : out std_logic;
+    m_write : out std_logic;
+    m_writedata : out std_logic_vector (7 downto 0)
 );
 end cache;
 
 architecture arch of cache is
 
+    constant LINES           : integer := 32;
+    constant WORD_BITS       : integer := 32;
+    constant LINE_BITS       : integer := 128;
+    constant BYTES_PER_BLOCK : integer := 16;
+    constant INDEX_BITS      : integer := 5;
+    constant OFFSET_BITS     : integer := 2;
+    constant TAG_BITS        : integer := 6;
 
-	type state_type is (READY, READ_RETURN, MEM_WRITE, MEM_READ, MEM_WRITE_LOOP, MEM_READ_LOOP, WRITE_COMPLETE, WRITE_MEM_READ, WRITE_MEM_READ_LOOP, WRITE_MEM_WRITE, WRITE_MEM_WRITE_LOOP, READ_COMPLETE);
-	signal state : state_type;
-	signal next_state : state_type;
+    subtype line_type is std_logic_vector(LINE_BITS-1 downto 0);
+    subtype word_type is std_logic_vector(WORD_BITS-1 downto 0);
+    subtype tag_type  is std_logic_vector(TAG_BITS-1 downto 0);
 
+    type data_array_type is array (0 to LINES-1) of line_type;
+    type tag_array_type  is array (0 to LINES-1) of tag_type;
 
-	CONSTANT LINES : integer := 32;
-	CONSTANT WORDS_PER_BLOCK : integer := 4;
-	CONSTANT WORD_BITS : integer := 32;
-	CONSTANT LINE_BITS : integer := 128;
+    signal data_array : data_array_type := (others => (others => '0'));
+    signal tag_array  : tag_array_type  := (others => (others => '0'));
+    signal valid_bit  : std_logic_vector(LINES-1 downto 0) := (others => '0');
+    signal dirty_bit  : std_logic_vector(LINES-1 downto 0) := (others => '0');
 
-	CONSTANT INDEX_BITS : integer := 5; --2^5=32
-	CONSTANT OFFSET_BITS : integer := 2; --only 2 are used because it is word-aligned
-	CONSTANT TAG_BITS : integer := 6; -- 6 = 15-5-4
+    signal req_addr      : std_logic_vector(31 downto 0) := (others => '0');
+    signal req_writedata : word_type := (others => '0');
+    signal req_read      : std_logic := '0';
+    signal req_write     : std_logic := '0';
 
-	--helpful for common lengths
-	subtype line_type is std_logic_vector(LINE_BITS-1 downto 0);
-	subtype word_type is std_logic_vector(WORD_BITS-1 downto 0);
-	subtype tag_type is std_logic_vector(TAG_BITS-1 downto 0);
+    signal req_tag       : tag_type := (others => '0');
+    signal req_index     : unsigned(INDEX_BITS-1 downto 0) := (others => '0');
+    signal req_offset    : unsigned(OFFSET_BITS-1 downto 0) := (others => '0');
+    signal req_index_int   : integer range 0 to LINES-1 := 0;
 
+    signal byte_count    : integer range 0 to BYTES_PER_BLOCK-1 := 0;
 
-  --cache storage arrays
-	type data_array_type is array (0 to LINES-1) of line_type;
-	type tag_array_type is array (0 to LINES-1) of tag_type;
+    type state_type is (
+        READY,
+        DECISION,
+        WRITEBACK,
+        WAIT_WRITEBACK,
+        FILL_LINE,
+        WAIT_FILL,
+        READ_COMPLETE,
+        WRITE_COMPLETE
+    );
+    signal state : state_type := READY;
 
-	signal data_array : data_array_type := (others => (others => '0'));
-	signal tag_array : tag_array_type := (others => (others => '0'));
-	signal valid_bit : std_logic_vector(LINES-1 downto 0) := (others => '0');
-	signal dirty_bit : std_logic_vector(LINES-1 downto 0) := (others => '0');
+    function get_word(
+        line_in : line_type;
+        offset  : unsigned(OFFSET_BITS-1 downto 0)
+    ) return word_type is
+        variable start_bit : integer;
+        variable stop_bit  : integer;
+    begin
+        start_bit := to_integer(offset) * WORD_BITS;
+        stop_bit  := start_bit + WORD_BITS - 1;
+        return line_in(stop_bit downto start_bit);
+    end function;
 
-	-- Decoded address fields (using only lower 15 bits)
-	signal addr_tag : tag_type;
-	signal addr_index : unsigned(INDEX_BITS-1 downto 0);
-	signal addr_offset : unsigned(OFFSET_BITS-1 downto 0);
-	signal index_i : integer range 0 to LINES-1;
+    function set_word(
+        line_in : line_type;
+        offset  : unsigned(OFFSET_BITS-1 downto 0);
+        data    : word_type
+    ) return line_type is
+        variable l : line_type := line_in;
+        variable start_bit : integer;
+        variable stop_bit  : integer;
+    begin
+        start_bit := to_integer(offset) * WORD_BITS;
+        stop_bit  := start_bit + WORD_BITS - 1;
+        l(stop_bit downto start_bit) := data;
+        return l;
+    end function;
 
-	-- Datapath signals
-	signal line_q : line_type;
-	signal hit : std_logic; -- 0 or 1
-	signal tag_match : std_logic;
+    function set_byte(
+        line_in    : line_type;
+        byte_index : integer range 0 to BYTES_PER_BLOCK-1;
+        data       : std_logic_vector(7 downto 0)
+    ) return line_type is
+        variable l : line_type := line_in;
+        variable start_bit : integer;
+        variable stop_bit  : integer;
+    begin
+        start_bit := byte_index * 8;
+        stop_bit  := start_bit + 7;
+        l(stop_bit downto start_bit) := data;
+        return l;
+    end function;
 
-	signal loop_index_write : integer range 0 to 3 := 0;
-	signal loop_index_read : integer range 0 to 3 := 0;
+	--computes base address of requested block
+    function req_base_addr(a : std_logic_vector(31 downto 0)) return integer is
+    begin
+        return to_integer(unsigned(a(14 downto 4))) * 16;
+    end function;
 
-
-	-- Helper Function to extract one 32-bit word from a 128-bit cache line
-	function get_word(
-		line_in : line_type;
-		offset : unsigned(OFFSET_BITS-1 downto 0)
-	) return word_type is
-		variable start_bit: integer;
-		variable stop_bit : integer;
-		variable w : word_type;
-	begin
-		start_bit := to_integer(offset)*WORD_BITS;
-		stop_bit := start_bit + WORD_BITS -1;
-		w := line_in(stop_bit downto start_bit);
-
-		return w;
-	end function;
-
-	--Helper Function to replace one 32-bit word inside a 128-bit cache line
-	function set_word(
-		line_in : line_type;
-		offset : unsigned(OFFSET_BITS-1 downto 0);
-		data : word_type
-	) return line_type is
-		variable start_bit: integer;
-		variable stop_bit : integer;
-		variable l : line_type := line_in;
-	begin
-		start_bit := to_integer(offset)*WORD_BITS;
-		stop_bit := start_bit + WORD_BITS -1;
-		l(stop_bit downto start_bit) := data;
-
-		return l;
-	end function;
-
-	function set_byte(
-		line_in : line_type;
-		offset_word : unsigned(OFFSET_BITS-1 downto 0);
-		offset_byte : unsigned(OFFSET_BITS-1 downto 0);
-		data : std_logic_vector(7 downto 0)
-	) return line_type is
-		variable l : line_type := line_in;
-		variable start_bit: integer;
-		variable stop_bit : integer;
-	begin
-		start_bit := to_integer(offset_word) * WORD_BITS + to_integer(offset_byte) * 8;
-		stop_bit := start_bit + 8 - 1;
-		l(stop_bit downto start_bit) := data;
-		return l;
-	end function;
-
-
+	--when dirty line is evicted need to know where in main memory the block belongs
+    function current_base_addr(
+        t   : tag_type;
+        idx : unsigned(INDEX_BITS-1 downto 0)
+    ) return integer is
+    begin
+        return (to_integer(unsigned(t)) * LINES + to_integer(idx)) * 16;
+    end function;
 
 begin
 
+    req_tag     <= req_addr(14 downto 9);
+    req_index   <= unsigned(req_addr(8 downto 4));
+    req_offset  <= unsigned(req_addr(3 downto 2));
+    req_index_int <= to_integer(unsigned(req_addr(8 downto 4)));
 
-	--split the addresses
-	addr_tag <= s_addr(14 downto 9);
-	addr_index <= unsigned(s_addr(8 downto 4));
-	addr_offset <= unsigned(s_addr(3 downto 2));
-	index_i <= to_integer(addr_index);
+    process(clock, reset)
+        variable tmp_line : line_type;
+    begin
+        if reset = '1' then
+            state         <= READY;
+            data_array    <= (others => (others => '0'));
+            tag_array     <= (others => (others => '0'));
+            valid_bit     <= (others => '0');
+            dirty_bit     <= (others => '0');
+            req_addr      <= (others => '0');
+            req_writedata <= (others => '0');
+            req_read      <= '0';
+            req_write     <= '0';
+            byte_count    <= 0;
 
+        elsif rising_edge(clock) then
+            
+			if state = READY then 
+				if s_read = '1' or s_write = '1' then
+                    req_addr      <= s_addr;
+                    req_writedata <= s_writedata;
+                    req_read      <= s_read;
+                    req_write     <= s_write;
+                    state         <= DECISION;
+                end if;
+			
+			elsif state = DECISION then 
+				if req_read = '1' then
+                     if valid_bit(req_index_int) = '1' and tag_array(req_index_int) = req_tag then
+                        state <= READ_COMPLETE;
+                    elsif valid_bit(req_index_int) = '1' and dirty_bit(req_index_int) = '1' then
+                        byte_count <= 0;
+                        state <= WRITEBACK;
+                    else
+                        byte_count <= 0;
+                        state <= FILL_LINE;
+                    end if;
 
-	--Read cache line and compute Hit
-	line_q <= data_array(index_i);
-	tag_match <= '1' when tag_array(index_i) = addr_tag else '0';
-	hit <= valid_bit(index_i) and tag_match;
+                elsif req_write = '1' then
+                    if valid_bit(req_index_int) = '1' and tag_array(req_index_int) = req_tag then
+                        data_array(req_index_int) <= set_word(data_array(req_index_int), req_offset, req_writedata);
+                        valid_bit(req_index_int)  <= '1';
+                        dirty_bit(req_index_int)  <= '1';
+                        state <= WRITE_COMPLETE;
+                    elsif valid_bit(req_index_int) = '1' and dirty_bit(req_index_int) = '1' then
+                        byte_count <= 0;
+                        state <= WRITEBACK;
+                    else
+                        byte_count <= 0;
+                        state <= FILL_LINE;
+                    end if;
+                else
+                    state <= READY;
+                end if;
+			
+			elsif state = WRITEBACK then 
+				state <= WAIT_WRITEBACK;
+			
+			elsif state = WAIT_WRITEBACK then 
+				if m_waitrequest = '0' then
+                    if byte_count = BYTES_PER_BLOCK-1 then
+                        dirty_bit(req_index_int) <= '0';
+                        byte_count <= 0;
+                        state <= FILL_LINE;
+                    else
+                        byte_count <= byte_count + 1;
+                        state <= WRITEBACK;
+                    end if;
+                end if;			
 
-process (clock, reset)
-begin
-    if reset = '1' then
-        state            <= READY;
-        valid_bit        <= (others => '0');
-        dirty_bit        <= (others => '0');
-        loop_index_write <= 0;
-        loop_index_read  <= 0;
+			elsif state = FILL_LINE then 
+				state <= WAIT_FILL;
+			
+			elsif state = WAIT_FILL then 
+				if m_waitrequest = '0' then
+                    tmp_line := set_byte(data_array(req_index_int), byte_count, m_readdata);
 
-    elsif (clock'event and clock = '1') then
-        state <= next_state;
+                    if byte_count = BYTES_PER_BLOCK-1 then
+                        if req_write = '1' then
+                            tmp_line := set_word(tmp_line, req_offset, req_writedata);
+                            dirty_bit(req_index_int) <= '1';
+                            state <= WRITE_COMPLETE;
+                        else
+                            dirty_bit(req_index_int) <= '0';
+                            state <= READ_COMPLETE;
+                        end if;
 
-        -- MEM_WRITE_LOOP: dirty writeback during a read-miss
-        if state = MEM_WRITE_LOOP and m_waitrequest = '0' then
-            if loop_index_write = 3 then
-                loop_index_write <= 0;
-            else
-                loop_index_write <= loop_index_write + 1;
+                        data_array(req_index_int) <= tmp_line;
+                        tag_array(req_index_int)  <= req_tag;
+                        valid_bit(req_index_int)  <= '1';
+                        byte_count <= 0;
+                    else
+                        data_array(req_index_int) <= tmp_line;
+                        byte_count <= byte_count + 1;
+                        state <= FILL_LINE;
+                    end if;
+                end if;
+
+			elsif state = READ_COMPLETE then 
+				req_read  <= '0';
+                req_write <= '0';
+                state <= READY;
+				
+			elsif state = WRITE_COMPLETE then 
+				req_read  <= '0';
+                req_write <= '0';
+            	state <= READY;
+				
+			end if;
+
+	
+        end if;
+    end process;
+
+    process(state, reset, req_addr, req_offset, req_index, req_index_int, byte_count,
+            data_array, tag_array)
+    begin
+        s_waitrequest <= '1';
+        s_readdata    <= (others => '0');
+        m_addr        <= 0;
+        m_read        <= '0';
+        m_write       <= '0';
+        m_writedata   <= (others => '0');
+
+        if reset = '1' then
+            s_waitrequest <= '1';
+        else
+            if state = READY then
+                null;
+
+        	elsif state = DECISION then
+                null;
+
+            elsif state =  WRITEBACK then
+                m_addr      <= current_base_addr(tag_array(req_index_int), req_index) + byte_count;
+                m_writedata <= data_array(req_index_int)(byte_count*8 + 7 downto byte_count*8);
+                m_write     <= '1';
+
+            elsif state = WAIT_WRITEBACK then
+                null;
+
+            elsif state = FILL_LINE then
+                m_addr <= req_base_addr(req_addr) + byte_count;
+                m_read <= '1';
+
+        	elsif state = WAIT_FILL then
+                null;
+
+            elsif state = READ_COMPLETE then
+                s_waitrequest <= '0';
+                s_readdata    <= get_word(data_array(req_index_int), req_offset);
+
+            elsif state = WRITE_COMPLETE then
+                s_waitrequest <= '0';
             end if;
         end if;
+    end process;
 
-        -- MEM_READ_LOOP: cache-line fill during a read-miss
-        if state = MEM_READ_LOOP and m_waitrequest = '0' then
-            if loop_index_read = 3 then
-                loop_index_read <= 0;
-            else
-                loop_index_read <= loop_index_read + 1;
-            end if;
-        end if;
-
-	-- MEM_READ_LOOP: update valid bit and tags after read miss fill
-	if state = MEM_READ_LOOP and m_waitrequest = '0' and loop_index_read = 3 then
-		valid_bit(index_i) <= '1';
-		tag_array(index_i) <= addr_tag;
-	end if;
-
-        -- WRITE_MEM_WRITE_LOOP: dirty writeback during a write-miss
-        if state = WRITE_MEM_WRITE_LOOP and m_waitrequest = '0' then
-            if loop_index_write = 3 then
-                loop_index_write <= 0;
-            else
-                loop_index_write <= loop_index_write + 1;
-            end if;
-        end if;
-
-        -- WRITE_MEM_READ_LOOP: cache-line fill during a write-miss
-        if state = WRITE_MEM_READ_LOOP and m_waitrequest = '0' then
-            if loop_index_read = 3 then
-                loop_index_read <= 0;
-            else
-                loop_index_read <= loop_index_read + 1;
-            end if;
-        end if;
-
-	-- WRITE_MEM_READ_LOOP: update valid bit and tags after write miss fill
-
-	if state = WRITE_MEM_READ_LOOP and m_waitrequest = '0' and loop_index_read = 3 then
-		valid_bit(index_i) <= '1';
-		tag_array(index_i) <= addr_tag;
-	end if; 
-
-    end if;
-end process;
-
-
-	--Wite-hit datapath (update the cache storage on Write-Hit)
-	process(state, s_addr, s_read, s_write, s_writedata, m_readdata, m_waitrequest,
-        hit, dirty_bit, line_q, data_array, tag_array,
-        addr_tag, addr_index, addr_offset, index_i,
-        loop_index_write, loop_index_read)
-		variable new_line : line_type;
-		
-	begin
-		-- https://excalidraw.com/#json=CmyTc7BcgbbeXJ421pLy5,vuiMduC28oUOa3ZPwbwgWA
-		
-		next_state <= state;
-   		m_read <= '0';
-   		m_write <= '0';
-    	s_waitrequest <= '1';
-		
-		case state is
-			when READY =>
-				if (s_read = '1') then
-					-- valid && clean/dirty && match
-					if (hit = '1') then
-						next_state <= READ_RETURN;
-					-- invalid/miss
-					elsif (hit = '0') then
-						-- dirty
-						if (dirty_bit(index_i) = '1') then
-							next_state <= MEM_WRITE;
-						-- clean || invalid (invalid bit cannot be dirty)
-						else
-							next_state <= MEM_READ;
-						end if;
-					end if;
-					s_waitrequest <= '1';
-				elsif s_write = '1' then
-					-- valid && match
-					if (hit = '1') then
-						-- write with dirty bit to 1
-						new_line := set_word(data_array(index_i), addr_offset, s_writedata);
-						data_array(index_i) <= new_line;
-						dirty_bit(index_i) <= '1';
-						s_waitrequest <= '0';
-						next_state <= WRITE_COMPLETE;
-
-					-- (invalid || miss) && clean
-					elsif (dirty_bit(index_i) = '0') then
-						-- read into memory then write on top, no need to write back whats there
-						next_state <= WRITE_MEM_READ;
-						s_waitrequest <= '1';
-
-					-- (invalid || miss) && dirty
-					elsif (dirty_bit(index_i) = '1') then
-						-- write back what is already there then read in new info
-						next_state <= WRITE_MEM_WRITE;
-						s_waitrequest <= '1';
-
-					end if;
-				else
-					s_waitrequest <= '0';
-				end if;
-
-			when READ_RETURN =>
-				s_waitrequest <= '0';
-				s_readdata <= get_word(line_q, addr_offset);
-				if (s_read = '0') then
-					next_state <= READ_COMPLETE;
-				end if;
-
-			when MEM_WRITE =>
-				m_addr <= to_integer(unsigned(tag_array(index_i)) & (addr_index) & (addr_offset) & to_unsigned(loop_index_write,4));
-				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
-				m_write <= '1';
-				next_state <= MEM_WRITE_LOOP;
-
-			when MEM_WRITE_LOOP =>
-				if (m_waitrequest = '0') then
-					m_write <= '0';
-					if (loop_index_write = 3) then
-						
-						next_state <= MEM_READ;
-					else
-						
-						next_state <= MEM_WRITE;
-					end if;
-				end if;
-
-			when MEM_READ =>
-				m_addr <= to_integer(unsigned(addr_tag) & addr_index & addr_offset & to_unsigned(loop_index_read,2));
-				m_read <= '1';
-				next_state <= MEM_READ_LOOP;
-
-			when MEM_READ_LOOP =>
-				if (m_waitrequest = '0') then
-					m_read <= '0';
-					new_line := set_byte(data_array(index_i), addr_offset, to_unsigned(loop_index_read,2), m_readdata);
-					data_array(index_i) <= new_line;
-					dirty_bit(index_i) <= '0';
-					if (loop_index_read = 3) then
-						next_state <= READ_RETURN;
-					else
-						next_state <= MEM_READ;
-					end if;
-				end if;
-
-			when WRITE_MEM_WRITE =>
-				m_addr <= to_integer(unsigned(tag_array(index_i)) & addr_index & addr_offset & to_unsigned((loop_index_write / 8),2));
-				m_writedata <= get_word(line_q, addr_offset)((loop_index_write * 8) + 7 downto loop_index_write * 8);
-				m_write <= '1';
-				next_state <= WRITE_MEM_WRITE_LOOP;
-
-			when WRITE_MEM_WRITE_LOOP =>
-				if (m_waitrequest = '0') then
-					m_write <= '0';
-					if (loop_index_write = 3) then
-						next_state <= MEM_READ;
-					else
-						next_state <= WRITE_MEM_WRITE;
-					end if;
-				end if;
-
-
-			when WRITE_MEM_READ =>
-				m_addr <= to_integer(unsigned(addr_tag) & addr_index & addr_offset & to_unsigned((loop_index_read / 8),2));
-				m_read <= '1';
-				next_state <= WRITE_MEM_READ_LOOP;
-
-			when WRITE_MEM_READ_LOOP =>
-				if (m_waitrequest = '0') then
-					m_read <= '0';
-					new_line := set_byte(data_array(index_i), addr_offset, to_unsigned(loop_index_read,2), m_readdata);
-					data_array(index_i) <= new_line;
-					dirty_bit(index_i) <= '0';
-					if (loop_index_read = 3) then
-						new_line := set_word(data_array(index_i), addr_offset, s_writedata);
-						data_array(index_i) <= new_line;
-						dirty_bit(index_i) <= '1';
-						s_waitrequest <= '0';
-
-						next_state <= WRITE_COMPLETE;
-					else
-						next_state <= WRITE_MEM_READ;
-				end if;
-				end if;
-
-			when WRITE_COMPLETE =>
-				next_state <= READY;
-			when READ_COMPLETE =>
-				next_state <= READY;
-			when others=>
-			end case;
-end process;
 end arch;
