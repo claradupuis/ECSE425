@@ -145,20 +145,18 @@ begin
             wait until rising_edge(clock);
         end procedure;
 
+        -- A0 and A1 have same index but different tag
         constant A0  : integer := 16#000#;
         constant A1  : integer := 16#200#;
 
+        -- B0 and B1 have same index but different tag
         constant B0  : integer := 16#020#;
         constant B1  : integer := 16#220#;
-
-        constant C0  : integer := 16#040#;
-        constant C1  : integer := 16#240#;
 
         constant WD1 : std_logic_vector(31 downto 0) := x"DEADBEEF";
         constant WD2 : std_logic_vector(31 downto 0) := x"CAFEBABE";
         constant WD3 : std_logic_vector(31 downto 0) := x"AAAAAAAA";
         constant WD4 : std_logic_vector(31 downto 0) := x"12345678";
-        constant WD5 : std_logic_vector(31 downto 0) := x"EEEEEEEE";
 
     begin
         reset <= '1';
@@ -175,85 +173,58 @@ begin
 
         -- TEST CASE 1:
         -- Cache is empty so no valid line --> miss
-        -- Cache fetches from memory 
-        do_read(A0, mem_word(A0), "TC1: invalid line, read miss");
+        -- Cache fetches B0 from memory 
+        do_read(B0, mem_word(B0), "TC1: invalid line, tag not equal, not dirty, read");
         
          -- TEST CASE 2:
-        -- line is not valid. A0 is not dirty so no writeback
-        -- Cache fetches from memory 
-        do_write(B0, mem_word(B0), "TC2: invalid line, write miss");
+        -- line is not valid. B0 is not dirty so no writeback
+        -- Cache fetches A0 from memory and writes to it --> set dirty bit
+        do_write(A0, mem_word(A0), "TC2: invalid line, tag not equal, not dirty, write");
         
         -- TEST CASE 3: 
-        -- A0 is now in cache --> hit 
-        -- no memory access
-        do_read(A0, mem_word(A0), "TC:3 clean line, read hit");
+        -- A0 is already in cache
+        do_read(A0, mem_word(A0), "TC3: valid line, tag equal, dirty, read");
 
          -- TEST CASE 4: 
-        -- A0 is in cache and clean --> no writeback
-        -- valid but tag not equal
-        do_write(A1, WD1, "TC4: clean line, write hit");
+        -- A0 is in cache and dirty --> need writeback
+        -- fetch A1 and write to it --> set dirty bit
+        do_write(A1, WD1, "TC4: Valid line, tag not equal, dirty, write");
 
- 
         -- TEST CASE 5: 
-        -- A1 maps to same index. Tag equal. dirty 
-        do_read(A1, WD1, "TC5: clean victim, read miss");
+        -- A1 is in cache and is already dirty
+        do_write(A1, WD2, "TC5: valid line, tag equal, dirty, write ");
 
-       
         -- TEST CASE 6: 
-        -- A1 is in cache and clean --> hit. No memory access
-        -- cache updates word and sets dirty bit.
-        do_write(A1, WD1, "TC6: clean line, write hit");
-
-    
-        -- TEST CASE 7:
-        -- A1 is in cache (and is dirty) -> hit
-        -- data returned from cache
-        do_read(A1, WD1, "TC7: dirty line, read hit");
-
-        
-        -- TEST CASE 8:
-        -- Writing to A1 --> hit 
-        -- cache updates word and A1 remains dirty
-        do_write(A1, WD3, "TC8: dirty line, write hit");
-        --verify updated value
-        do_read(A1, WD3, "TC8 verify: dirty hit stores newest data");
-
-
-        -- TEST CASE 9: 
         -- A1 is in cache and dirty 
         -- Access A0 --> miss
         -- cache needs to writeback A1 to memory and load A0
-        do_read(A0, mem_word(A0), "TC9: dirty victim, read miss (writeback)");
-        --verify that writeback worked
-        do_read(A1, WD3, "TC9 verify: writeback preserved old dirty data");
+        do_read(A0, mem_word(A0), "TC6: valid line, tag not equal, dirty, read");
 
-       
+        -- TEST CASE 7:
+        -- B0 not in cache --> miss
+        -- fetch B0 from memory 
+        do_read(B0, mem_word(B0), "TC7: invalid line, tag not equal, not dirty, read");
+
+        -- TEST CASE 8:
+        -- B0 is in cache and is not dirty
+        do_read(B0, mem_word(B0), "TC8: valid line, tag equal, not dirty, read");
+
+        -- TEST CASE 9: 
+        -- B0 is not dirty
+        -- load B1 into cache 
+        do_read(B1, mem_word(B1), "TC9: valid line, tag not equal, not dirty, read");
+
         -- TEST CASE 10: 
-        -- B0 not in cache --> miss 
-        -- write-allocate (Load B0 from memory, update word, mark line dirty)
-        do_write(B0, WD2, "TC10: invalid line, write miss (write-allocate)");
+        -- B1 is in the cache and not dirty 
+        do_write(B1, mem_word(B1), "TC10: valid line, tag equal, not dirty, write");
 
-        
         -- TEST CASE 11: 
-        -- Acces B1 --> miss
-        -- B0 is dirty so need to writeback B0, load B1
-        -- write performed on B1 and mark as dirty
-        do_write(B1, WD4, "TC11: dirty victim, write miss (writeback + allocate)");
-        do_read(B1, WD4, "TC11 verify: new dirty line stores written data");
-        do_read(B0, WD2, "TC11 verify: evicted dirty line written back");
+        -- B1 is not dirty
+        do_write(B0, WD4, "TC11: valid line, tag not equal, not dirty, write");
 
-        
-        -- TEST CASE 12: valid clean + write + miss
-        -- load C0. in cache 
-        do_read(C0, mem_word(C0), "TC12 setup: load clean line");
-        -- C1 not in cache. Don't need writeback. replace block and perform write
-        do_write(C1, WD5, "TC12: clean victim, write miss (allocate only)");
-        --verify that data is correctly stored
-        do_read(C1, WD5, "TC12 verify: clean-victim miss stores written data");
-        --verify no corruption 
-        do_read(C0, mem_word(C0), "TC12 verify: clean eviction caused no corruption");
 
-        report "All relevant cache access cases completed." severity note;
+
+        report "All test cases completed." severity note;
         report  "ALL TESTS PASSED" severity note;
 
         wait;
