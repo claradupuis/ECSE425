@@ -1,0 +1,4 @@
+- Stuff inside riscv_assembler/ is from assignment spec
+- testbench.tcl I/O w/ files and calls processor_tb.vhd
+- processor.vhd instantiates 2 memory instances
+- no cache from P3, assignment spec didn't mention it so I don't think it's needed?
