@@ -18,7 +18,7 @@ ARCHITECTURE behaviour OF processor_tb IS
     signal reset : std_logic := '1';
 
 begin
-    dut: entity processor
+    dut: entity work.processor
         port map (
             clk   => clk,
             reset => reset
