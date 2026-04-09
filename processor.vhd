@@ -231,7 +231,7 @@ begin
 
             -- U-type
             when "0110111" | "0010111" =>
-                id_imm <= if_id_instr(31 downto 12);
+                id_imm <= if_id_instr(31 downto 12) & x"000";
 
             -- J-type
             when "1101111" =>
@@ -504,6 +504,20 @@ begin
 
     --MISSING MEMORY STAGE
 
+    process()
+    begin 
+        
+
+
+
+
+
+
+    end process;
+
+
+    
+
     process(Clk)
     begin 
         if rising_edge(clk) then 
@@ -522,7 +536,7 @@ begin
     process(clk)
     begin
         if rising_edge(clk) then
-            if mem_wb_regwrite = '1' then
+            if mem_wb_regwrite = '1' and mem_wb_rd /= 0 then --x0 should stay 0
                 reg_file(mem_wb_rd) <= wb_data;
             end if;
             reg_file(0) <= (others => '0');
