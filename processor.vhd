@@ -1,11 +1,27 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use work.types.all;
+
 
 ENTITY processor IS
+
     PORT (
         clk : in std_logic;
-        reset : in std_logic
+        reset : in std_logic;
+        dbg_imem_writedata   : out std_logic_vector(7 downto 0);
+        dbg_imem_readdata    : out std_logic_vector(7 downto 0);
+        dbg_imem_address     : out integer range 0 to 32767;
+        dbg_imem_memwrite    : out std_logic;
+        dbg_imem_memread     : out std_logic;
+        dbg_imem_waitrequest : out std_logic;
+        dbg_dmem_writedata   : out std_logic_vector(7 downto 0);
+        dbg_dmem_readdata    : out std_logic_vector(7 downto 0);
+        dbg_dmem_address     : out integer range 0 to 32767;
+        dbg_dmem_memwrite    : out std_logic;
+        dbg_dmem_waitrequest : out std_logic;
+        dbg_dmem_memread     : out std_logic;
+        dbg_reg_file : out reg_array_t
     );
 end entity;
 
@@ -29,7 +45,7 @@ ARCHITECTURE behaviour of processor is
     end COMPONENT;
 
     -- registers
-    type reg_array_t is array (0 to 31) of std_logic_vector(31 downto 0);
+    -- type reg_array_t is array (0 to 31) of std_logic_vector(31 downto 0);
     signal reg_file : reg_array_t := (others => (others => '0')); --sets all to 0 i think
 
     --pc
@@ -185,6 +201,21 @@ begin
     id_reg2 <= reg_file(id_rs2);
     
     reg_file(0) <= (others => '0');
+
+    -- connect debug ports to signals
+    dbg_imem_writedata <= imem_writedata;
+    dbg_imem_readdata   <= imem_readdata;
+    dbg_imem_address <= imem_address;  
+    dbg_imem_memwrite <= imem_memwrite;
+    dbg_imem_memread <= imem_memread;
+    dbg_imem_waitrequest <= imem_waitrequest;
+    dbg_dmem_writedata <= dmem_writedata;
+    dbg_dmem_readdata <= dmem_readdata;
+    dbg_dmem_address  <= dmem_address;
+    dbg_dmem_memwrite    <= dmem_memwrite;
+    dbg_dmem_memread     <= dmem_memread;
+    dbg_dmem_waitrequest <= dmem_waitrequest;
+
 
     process(if_id_instr, id_opcode)
     begin
@@ -420,9 +451,9 @@ begin
 
             -- jump and link register
             when "1100111" =>
-                --jalr REVIEWWWWW
+                --jalr 
                 ex_alu_result   <= ex_link_addr; -- Pc+4
-                ex_branch_addr  <= std_logic_vector((unsigned(id_ex_reg1) + unsigned(id_ex_imm)) and unsigned(x"FFFFFFFE"));
+                ex_branch_addr  <= std_logic_vector((unsigned(id_ex_reg1) + unsigned(id_ex_imm)));
                 ex_branch_taken <= '1';
 
             -- load upper imm
