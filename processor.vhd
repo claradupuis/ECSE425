@@ -19,8 +19,8 @@ ARCHITECTURE behaviour of processor is
         );
         PORT (
             clock: IN STD_LOGIC;
-            writedata: IN STD_LOGIC_VECTOR (7 DOWNTO 0);
-            address: IN INTEGER RANGE 0 TO ram_size-1;
+            writedata: IN STD_LOGIC_VECTOR (31 DOWNTO 0);
+            address: IN INTEGER RANGE 0 TO (ram_size/4)-1;
             memwrite: IN STD_LOGIC;
             memread: IN STD_LOGIC;
             readdata: OUT STD_LOGIC_VECTOR (7 DOWNTO 0);
@@ -30,9 +30,7 @@ ARCHITECTURE behaviour of processor is
 
     -- registers
     type reg_array_t is array (0 to 31) of std_logic_vector(31 downto 0);
-    type mem_word_array_t is array (0 to 8191) of std_logic_vector(31 downto 0);
     signal reg_file : reg_array_t := (others => (others => '0')); --sets all to 0 i think
-    signal instr_mem : mem_word_array_t := (others => (others => '0'));
     
     --pc
     signal pc : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
@@ -41,17 +39,17 @@ ARCHITECTURE behaviour of processor is
     
 
     -- instruction memory 
-    signal imem_writedata : std_logic_vector(7 downto 0);
-    signal imem_readdata : std_logic_vector(7 downto 0);
-    signal imem_address : integer range 0 to 32767 
+    signal imem_writedata : std_logic_vector(31 downto 0);
+    signal imem_readdata : std_logic_vector(31 downto 0);
+    signal imem_address : integer range 0 to 8191 := 0; 
     signal imem_memwrite : std_logic := '0';
     signal imem_memread : std_logic := '0';
     signal imem_waitrequest : std_logic;
 
     -- data memory
-    signal dmem_writedata : std_logic_vector(7 downto 0) := (others => '0');
-    signal dmem_readdata : std_logic_vector(7 downto 0);
-    signal dmem_address : integer range 0 to 32767 := 0;
+    signal dmem_writedata : std_logic_vector(31 downto 0) := (others => '0');
+    signal dmem_readdata : std_logic_vector(31 downto 0);
+    signal dmem_address : integer range 0 to 8191 := 0;
     signal dmem_memwrite : std_logic := '0';
     signal dmem_memread : std_logic := '0';
     signal dmem_waitrequest : std_logic;
@@ -136,10 +134,18 @@ ARCHITECTURE behaviour of processor is
     --writeback
     signal wb_data : std_logic_vector(31 downto 0);
 
-    function sign_extend(inp : std_logic_vector; out_size : integer) return std_logic_vector is
+    function sign_extend(inp : std_logic_vector; out_size:integer) return std_logic_vector is
     variable result : std_logic_vector(out_size-1 downto 0);
     begin
         result := (others => inp(inp'left));
+        result(inp'length-1 downto 0) := inp;
+        return result;
+    end function;
+
+    function zero_extend(inp:std_logic_vector; out_size:integer) return std_logic_vector is
+    variable result:std_logic_vector(out_size-1 downto 0);
+    begin
+        result := (others => '0');
         result(inp'length-1 downto 0) := inp;
         return result;
     end function;
@@ -178,8 +184,12 @@ begin
             waitrequest => dmem_waitrequest
         );
     
-    instr_if <= instr_mem(to_integer(unsigned(pc(14 downto 2))));
+    imem_address <= to_integer(unsigned(pc(14 downto 2)));
+    imem_memread <= '1';
+    imem_memwrite <= '0';
+    imem_writedata <= (others => '0');
 
+    instr_if <= imem_readdata;
     pc_next <= ex_mem_branch_addr when ex_mem_branch_taken = '1'
                else std_logic_vector(unsigned(pc) + 4);
 
@@ -189,7 +199,7 @@ begin
             pc <= pc_next;
             if ex_mem_branch_taken = '1' then
                 if_id_pc <= (others => '0');
-                if_id_instr <= x"00000000";
+                if_id_instr <= x"00000011";
             else
                 if_id_pc <= pc;
                 if_id_instr <= instr_if;
@@ -504,19 +514,28 @@ begin
 
     --MISSING MEMORY STAGE
 
-    process()
-    begin 
+    process(ex_mem_alu, ex_mem_reg2, ex_mem_memread, ex_mem_memwrite, ex_mem_funct3, dmem_readdata)
+        variable word_data : std_logic_vector(31 downto 0);
+    begin
+        dmem_memread  <= ex_mem_memread;
+        dmem_memwrite <= ex_mem_memwrite;
+        dmem_writedata <= ex_mem_reg2;
+        mem_load_data <= (others => '0');
+
+        word_data := dmem_readdata;
         
+       
+        if ex_mem_memread = '1' and ex_mem_funct3 = "010" then
+                --load word
+                mem_load_data <= word_data;
+        end if;
 
-
-
-
-
-
+        if ex_mem_memwrite = '1' and ex_mem_funct3 = "010" then 
+            -- store word
+            dmem_writedata <= ex_mem_reg2;
+        end if;
     end process;
 
-
-    
 
     process(Clk)
     begin 
