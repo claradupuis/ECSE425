@@ -18,9 +18,6 @@ vsim processor_tb
 
 AddWaves
 
-;# keep reset while loading prog into mem
-force -deposit sim:/processor_tb/reset 1
-
 ;# Load program.txt into instruction memory
 set prog [open "program.txt" "r"]
 set addr 0
@@ -32,53 +29,27 @@ while {[gets $prog line] >= 0} {
         continue
     }
 
-    ;# remove optional 0x prefix
-    regsub {^0[xX]} $line "" line
-
-    if {[string length $line] != 8} {
+    if {[string length $line] != 32} {
         puts "Bad instruction line: $line"
         quit -f
     }
 
-    set b0 [string range $line 0 1]
-    set b1 [string range $line 2 3]
-    set b2 [string range $line 4 5]
-    set b3 [string range $line 6 7]
+    ;# each line is one 32-bit instruction word
+    force -deposit sim:/processor_tb/dut/instruction_mem/ram_block($addr) 2#$line
 
-    ;# big-endian storage
-    force -deposit sim:/processor_tb/dut/instruction_mem/ram_block($addr)     16#$b0
-    force -deposit sim:/processor_tb/dut/instruction_mem/ram_block([expr {$addr+1}]) 16#$b1
-    force -deposit sim:/processor_tb/dut/instruction_mem/ram_block([expr {$addr+2}]) 16#$b2
-    force -deposit sim:/processor_tb/dut/instruction_mem/ram_block([expr {$addr+3}]) 16#$b3
-
-    set addr [expr {$addr + 4}]
+    incr addr
 }
 close $prog
-
-;# let reset go
-run 10 ns
-noforce sim:/processor_tb/reset
 
 ;# Run
 run 5000 ns
 
-;# Dump data memory
+;# Dump data memory as 32-bit words
 set mem_file [open "memory.txt" "w"]
 for {set i 0} {$i < 8192} {incr i} {
-    set base [expr {$i * 4}]
-
-    set b0 [examine -radix hex sim:/processor_tb/dut/data_mem/ram_block($base)]
-    set b1 [examine -radix hex sim:/processor_tb/dut/data_mem/ram_block([expr {$base+1}])]
-    set b2 [examine -radix hex sim:/processor_tb/dut/data_mem/ram_block([expr {$base+2}])]
-    set b3 [examine -radix hex sim:/processor_tb/dut/data_mem/ram_block([expr {$base+3}])]
-
-    ;# strip prefix/space
-    regsub -all {[^0-9A-Fa-f]} $b0 "" b0
-    regsub -all {[^0-9A-Fa-f]} $b1 "" b1
-    regsub -all {[^0-9A-Fa-f]} $b2 "" b2
-    regsub -all {[^0-9A-Fa-f]} $b3 "" b3
-
-    puts $mem_file "${b0}${b1}${b2}${b3}"
+    set word [examine -radix hex sim:/processor_tb/dut/data_mem/ram_block($i)]
+    regsub -all {[^0-9A-Fa-f]} $word "" word
+    puts $mem_file $word
 }
 close $mem_file
 
