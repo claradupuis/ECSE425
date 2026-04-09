@@ -21,7 +21,7 @@ ENTITY memory IS
 END memory;
 
 ARCHITECTURE rtl OF memory IS
-	TYPE MEM IS ARRAY(ram_size-1 downto 0) OF STD_LOGIC_VECTOR(7 DOWNTO 0);
+	TYPE MEM IS ARRAY(ram_size/4-1 downto 0) OF STD_LOGIC_VECTOR(31 DOWNTO 0);
 	SIGNAL ram_block: MEM;
 	SIGNAL read_address_reg: INTEGER RANGE 0 to ram_size-1;
 	SIGNAL write_waitreq_reg: STD_LOGIC := '1';
@@ -33,7 +33,7 @@ BEGIN
 		--This is a cheap trick to initialize the SRAM in simulation
 		IF(now < 1 ps)THEN
 			For i in 0 to ram_size-1 LOOP
-				ram_block(i) <= std_logic_vector(to_unsigned(i mod 256, 8));
+				ram_block(i) <= std_logic_vector(to_unsigned(i mod 256, 32));
 			END LOOP;
 		end if;
 

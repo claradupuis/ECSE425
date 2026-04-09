@@ -46,106 +46,112 @@ ARCHITECTURE behaviour of processor is
 
     -- registers
     -- type reg_array_t is array (0 to 31) of std_logic_vector(31 downto 0);
+    -- type reg_array_t is array (0 to 31) of std_logic_vector(31 downto 0);
+    type mem_word_array_t is array (0 to 8191) of std_logic_vector(31 downto 0);
     signal reg_file : reg_array_t := (others => (others => '0')); --sets all to 0 i think
-
+    signal instr_mem : mem_word_array_t := (others => (others => '0'));
+    
     --pc
-    signal pc : STD_LOGIC_VECTOR(31 downto 0);
+    signal pc : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+    signal pc_next  : std_logic_vector(31 downto 0) := (others => '0');
+    signal instr_if : std_logic_vector(31 downto 0) := (others => '0');
+    
 
     -- instruction memory 
-    signal imem_writedata   : std_logic_vector(7 downto 0) := (others => '0');
-    signal imem_readdata    : std_logic_vector(7 downto 0);
-    signal imem_address     : integer range 0 to 32767 := 0;
-    signal imem_memwrite    : std_logic := '0';
-    signal imem_memread     : std_logic := '0';
+    signal imem_writedata : std_logic_vector(7 downto 0);
+    signal imem_readdata : std_logic_vector(7 downto 0);
+    signal imem_address : integer range 0 to 32767; 
+    signal imem_memwrite : std_logic := '0';
+    signal imem_memread : std_logic := '0';
     signal imem_waitrequest : std_logic;
 
     -- data memory
-    signal dmem_writedata   : std_logic_vector(7 downto 0) := (others => '0');
-    signal dmem_readdata    : std_logic_vector(7 downto 0);
-    signal dmem_address     : integer range 0 to 32767 := 0;
-    signal dmem_memwrite    : std_logic := '0';
-    signal dmem_memread     : std_logic := '0';
+    signal dmem_writedata : std_logic_vector(7 downto 0) := (others => '0');
+    signal dmem_readdata : std_logic_vector(7 downto 0);
+    signal dmem_address : integer range 0 to 32767 := 0;
+    signal dmem_memwrite : std_logic := '0';
+    signal dmem_memread : std_logic := '0';
     signal dmem_waitrequest : std_logic;
 
-    --Instruction fetch
-    signal instr_if : std_logic_vector(31 downto 0) := (others => '0');
+   
 
     --IF/ID pipeline
-    signal if_id_pc    : std_logic_vector(31 downto 0) := (others => '0');
+    signal if_id_pc : std_logic_vector(31 downto 0) := (others => '0');
     signal if_id_instr : std_logic_vector(31 downto 0) := (others => '0');
     
     -- Decode 
-    signal id_rs1      : integer range 0 to 31;
-    signal id_rs2      : integer range 0 to 31;
-    signal id_rd       : integer range 0 to 31;
-    signal id_opcode   : std_logic_vector(6 downto 0);
-    signal id_funct3   : std_logic_vector(2 downto 0);
-    signal id_funct7   : std_logic_vector(6 downto 0);
-    signal id_reg1     : std_logic_vector(31 downto 0);
-    signal id_reg2     : std_logic_vector(31 downto 0);
-    signal id_imm      : std_logic_vector(31 downto 0);
+    signal id_rs1 : integer range 0 to 31;
+    signal id_rs2 : integer range 0 to 31;
+    signal id_rd : integer range 0 to 31;
+    signal id_opcode : std_logic_vector(6 downto 0);
+    signal id_funct3 : std_logic_vector(2 downto 0);
+    signal id_funct7 : std_logic_vector(6 downto 0);
+    signal id_reg1: std_logic_vector(31 downto 0);
+    signal id_reg2: std_logic_vector(31 downto 0);
+    signal id_imm : std_logic_vector(31 downto 0);
 
     signal id_regwrite : std_logic;
-    signal id_memread  : std_logic;
+    signal id_memread : std_logic;
     signal id_memwrite : std_logic;
     signal id_memtoreg : std_logic;
-    signal id_alu_use_imm   : std_logic;
-    signal id_branch   : std_logic;
-    signal id_jump     : std_logic;
-    signal id_aluop    : std_logic_vector(3 downto 0);
+    signal id_alu_use_imm : std_logic;
+    signal id_branch : std_logic;
+    signal id_jump : std_logic;
+    signal id_aluop : std_logic_vector(3 downto 0);
 
     -- ID/EX pipeline
-    signal id_ex_pc       : std_logic_vector(31 downto 0) := (others => '0');
-    signal id_ex_instr    : std_logic_vector(31 downto 0) := (others => '0');
-    signal id_ex_reg1     : std_logic_vector(31 downto 0) := (others => '0');
-    signal id_ex_reg2     : std_logic_vector(31 downto 0) := (others => '0');
-    signal id_ex_imm      : std_logic_vector(31 downto 0) := (others => '0');
-    signal id_ex_rs1      : integer range 0 to 31 := 0;
-    signal id_ex_rs2      : integer range 0 to 31 := 0;
-    signal id_ex_rd       : integer range 0 to 31 := 0;
-    signal id_ex_funct3   : std_logic_vector(2 downto 0) := (others => '0');
-    signal id_ex_funct7   : std_logic_vector(6 downto 0) := (others => '0');
+    signal id_ex_pc : std_logic_vector(31 downto 0) := (others => '0');
+    signal id_ex_instr : std_logic_vector(31 downto 0) := (others => '0');
+    signal id_ex_reg1 : std_logic_vector(31 downto 0) := (others => '0');
+    signal id_ex_reg2 : std_logic_vector(31 downto 0) := (others => '0');
+    signal id_ex_imm : std_logic_vector(31 downto 0) := (others => '0');
+    signal id_ex_rs1 : integer range 0 to 31 := 0;
+    signal id_ex_rs2 : integer range 0 to 31 := 0;
+    signal id_ex_rd : integer range 0 to 31 := 0;
+    signal id_ex_funct3 : std_logic_vector(2 downto 0) := (others => '0');
+    signal id_ex_funct7 : std_logic_vector(6 downto 0) := (others => '0');
 
     signal id_ex_regwrite : std_logic := '0';
-    signal id_ex_memread  : std_logic := '0';
+    signal id_ex_memread : std_logic := '0';
     signal id_ex_memwrite : std_logic := '0';
     signal id_ex_memtoreg : std_logic := '0';
-    signal id_ex_alu_use_imm   : std_logic := '0';
-    signal id_ex_branch   : std_logic := '0';
-    signal id_ex_jump     : std_logic := '0';
+    signal id_ex_alu_use_imm : std_logic := '0';
+    signal id_ex_branch : std_logic := '0';
+    signal id_ex_jump : std_logic := '0';
 
    -- Execute
-    signal ex_alu_in2      : std_logic_vector(31 downto 0);
-    signal ex_alu_result   : std_logic_vector(31 downto 0);
+    signal ex_alu_in2 : std_logic_vector(31 downto 0);
+    signal ex_alu_result : std_logic_vector(31 downto 0);
     signal ex_branch_taken : std_logic;
-    signal ex_branch_addr  : std_logic_vector(31 downto 0);
-    signal ex_link_addr    : std_logic_vector(31 downto 0) := (others => '0');
+    signal ex_branch_addr : std_logic_vector(31 downto 0);
+    signal ex_link_addr : std_logic_vector(31 downto 0) := (others => '0');
 
    -- EX/Mem pipeline
-    signal ex_mem_instr    : std_logic_vector(31 downto 0) := (others => '0');
-    signal ex_mem_alu      : std_logic_vector(31 downto 0) := (others => '0');
-    signal ex_mem_reg2     : std_logic_vector(31 downto 0) := (others => '0');
-    signal ex_mem_rd       : integer range 0 to 31 := 0;
-    signal ex_mem_funct3   : std_logic_vector(2 downto 0) := (others => '0');
+    signal ex_mem_instr : std_logic_vector(31 downto 0) := (others => '0');
+    signal ex_mem_alu : std_logic_vector(31 downto 0) := (others => '0');
+    signal ex_mem_reg2 : std_logic_vector(31 downto 0) := (others => '0');
+    signal ex_mem_rd : integer range 0 to 31 := 0;
+    signal ex_mem_funct3 : std_logic_vector(2 downto 0) := (others => '0');
     signal ex_mem_regwrite : std_logic := '0';
-    signal ex_mem_memread  : std_logic := '0';
+    signal ex_mem_memread : std_logic := '0';
     signal ex_mem_memwrite : std_logic := '0';
     signal ex_mem_memtoreg : std_logic := '0';
-    signal ex_mem_branch_taken : std_logic := '0';
+    signal ex_mem_branch_taken: std_logic := '0';
+    signal ex_mem_branch_addr  : std_logic_vector(31 downto 0) := (others => '0');
 
     --Memory
-    signal mem_load_data   : std_logic_vector(31 downto 0) := (others => '0');
+    signal mem_load_data : std_logic_vector(31 downto 0) := (others => '0');
 
     --Memory/Writeback pipeline
-    signal mem_wb_instr    : std_logic_vector(31 downto 0) := (others => '0');
-    signal mem_wb_alu      : std_logic_vector(31 downto 0) := (others => '0');
-    signal mem_wb_mem      : std_logic_vector(31 downto 0) := (others => '0');
-    signal mem_wb_rd       : integer range 0 to 31 := 0;
+    signal mem_wb_instr : std_logic_vector(31 downto 0) := (others => '0');
+    signal mem_wb_alu : std_logic_vector(31 downto 0) := (others => '0');
+    signal mem_wb_mem : std_logic_vector(31 downto 0) := (others => '0');
+    signal mem_wb_rd : integer range 0 to 31 := 0;
     signal mem_wb_regwrite : std_logic := '0';
     signal mem_wb_memtoreg : std_logic := '0';
 
     --writeback
-    signal wb_data         : std_logic_vector(31 downto 0);
+    signal wb_data : std_logic_vector(31 downto 0);
 
     function sign_extend(inp : std_logic_vector; out_size : integer) return std_logic_vector is
     variable result : std_logic_vector(out_size-1 downto 0);
@@ -188,13 +194,31 @@ begin
             readdata    => dmem_readdata,
             waitrequest => dmem_waitrequest
         );
-
     
+    instr_if <= instr_mem(to_integer(unsigned(pc(14 downto 2))));
+
+    pc_next <= ex_mem_branch_addr when ex_mem_branch_taken = '1'
+               else std_logic_vector(unsigned(pc) + 4);
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            pc <= pc_next;
+            if ex_mem_branch_taken = '1' then
+                if_id_pc <= (others => '0');
+                if_id_instr <= x"00000000";
+            else
+                if_id_pc <= pc;
+                if_id_instr <= instr_if;
+            end if;
+        end if;
+    end process;
+
     id_opcode <= if_id_instr(6 downto 0);
-    id_rd     <= to_integer(unsigned(if_id_instr(11 downto 7)));
+    id_rd <= to_integer(unsigned(if_id_instr(11 downto 7)));
     id_funct3 <= if_id_instr(14 downto 12);
-    id_rs1    <= to_integer(unsigned(if_id_instr(19 downto 15)));
-    id_rs2    <= to_integer(unsigned(if_id_instr(24 downto 20)));
+    id_rs1 <= to_integer(unsigned(if_id_instr(19 downto 15)));
+    id_rs2 <= to_integer(unsigned(if_id_instr(24 downto 20)));
     id_funct7 <= if_id_instr(31 downto 25);
 
     id_reg1 <= reg_file(id_rs1); -- used later in EX stage for operations
@@ -235,7 +259,7 @@ begin
                     if_id_instr(7) &
                     if_id_instr(30 downto 25) &
                     if_id_instr(11 downto 8) &
-                    '0', 32);
+                    '0', 32); 
 
             -- U-type
             when "0110111" | "0010111" =>
@@ -243,9 +267,7 @@ begin
 
             -- J-type
             when "1101111" =>
-                id_imm <= sign_extend(
-                    if_id_instr(31) &
-                    if_id_instr(19 downto 12) &
+                id_imm <= sign_extend( if_id_instr(31) & if_id_instr(19 downto 12) &
                     if_id_instr(20) &
                     if_id_instr(30 downto 21) &
                     '0', 32);
@@ -256,39 +278,39 @@ begin
     end process;
 
     -- when the opcode changes, the processor needs to decide what it will do 
-    process(id_opcode, id_funct3, id_funct7)
+    process(id_opcode)
     begin
         id_regwrite <= '0';
-        id_memread  <= '0';
+        id_memread <= '0';
         id_memwrite <= '0';
         id_memtoreg <= '0';
-        id_alu_use_imm   <= '0';
-        id_branch   <= '0';
-        id_jump     <= '0';
+        id_alu_use_imm  <= '0';
+        id_branch <= '0';
+        id_jump <= '0';
 
         case id_opcode is
             -- R-type --> Write a result and use two registers 
             when "0110011" =>
                 id_regwrite <= '1';
-                id_alu_use_imm   <= '0';
+                id_alu_use_imm <= '0';
 
             -- I-type --> writes and uses immediate value
             when "0010011" =>
                 id_regwrite <= '1';
-                id_alu_use_imm   <= '1';
+                id_alu_use_imm <= '1';
 
             -- lw --> read memory, write result to register 
             when "0000011" =>
                 id_regwrite <= '1';
-                id_memread  <= '1';
+                id_memread <= '1';
                 id_memtoreg <= '1';
-                id_alu_use_imm   <= '1';
+                id_alu_use_imm <= '1';
 
             -- store (sw) -- write to memory (not register)
             when "0100011" =>
                 id_memwrite <= '1';
                 id_regwrite <= '0';
-                id_alu_use_imm   <= '1';
+                id_alu_use_imm <= '1';
 
             -- Branches
             when "1100011" =>
@@ -297,44 +319,67 @@ begin
             -- jal -- Pc+4
             when "1101111" =>
                 id_regwrite <= '1';
-                id_jump     <= '1';
+                id_jump <= '1';
 
             -- jalr --> jumps to imm
             when "1100111" =>
                 id_regwrite <= '1';
-                id_jump     <= '1';
-                id_alu_use_imm   <= '1';
+                id_jump <= '1';
+                id_alu_use_imm <= '1';
 
             -- lui --> load imm value in register
             when "0110111" =>
                 id_regwrite <= '1';
-                id_alu_use_imm   <= '1';
+                --id_alu_use_imm <= '1';
 
             -- auipc --> rd = Pc+imm
             when "0010111" =>
                 id_regwrite <= '1';
-                id_alu_use_imm   <= '1';
+                --id_alu_use_imm <= '1';
 
             when others =>
                 null;
         end case;
     end process;
 
+   process(clk)
+    begin
+        if rising_edge(clk) then
+            id_ex_pc <= if_id_pc;
+            id_ex_instr <= if_id_instr;
+            id_ex_reg1 <= id_reg1;
+            id_ex_reg2 <= id_reg2;
+            id_ex_imm <= id_imm;
+            id_ex_rs1 <= id_rs1;
+            id_ex_rs2 <= id_rs2;
+            id_ex_rd <= id_rd;
+            id_ex_funct3 <= id_funct3;
+            id_ex_funct7 <= id_funct7;
+            id_ex_regwrite <= id_regwrite;
+            id_ex_memread <= id_memread;
+            id_ex_memwrite <= id_memwrite;
+            id_ex_memtoreg <= id_memtoreg;
+            id_ex_alu_use_imm <= id_alu_use_imm;
+            id_ex_branch <= id_branch;
+            id_ex_jump <= id_jump;
+        end if;
+    end process;
+
+
     --choose the ALU input (register or imm)
     ex_alu_in2 <= id_ex_reg2 when id_ex_alu_use_imm = '0' else id_ex_imm;
-
-
+    
 
     --EXE stage
     process(id_ex_reg1, id_ex_reg2, ex_alu_in2, id_ex_instr, id_ex_funct3, id_ex_funct7, id_ex_pc, id_ex_imm)
         variable shift_amount : integer range 0 to 31;
     begin
-        ex_alu_result   <= (others => '0');
+        ex_alu_result <= (others => '0');
         ex_branch_taken <= '0';
-        ex_branch_addr  <= (others => '0');
+        ex_branch_addr <= (others => '0');
 
         --Pc = Pc+4 --> for jal and jalr
-        ex_link_addr    <= std_logic_vector(unsigned(id_ex_pc) + 4);
+        ex_link_addr <= std_logic_vector(unsigned(id_ex_pc) + 4);
 
         shift_amount := to_integer(unsigned(ex_alu_in2(4 downto 0)));
 
@@ -445,35 +490,75 @@ begin
             -- jump and link
             when "1101111" =>
                 --jal
-                ex_alu_result   <= ex_link_addr; --Pc+4
-                ex_branch_addr  <= std_logic_vector(unsigned(id_ex_pc) + unsigned(id_ex_imm));
+                ex_alu_result <= ex_link_addr; --Pc+4
+                ex_branch_addr <= std_logic_vector(unsigned(id_ex_pc) + unsigned(id_ex_imm));
                 ex_branch_taken <= '1';
 
             -- jump and link register
             when "1100111" =>
-                --jalr 
-                ex_alu_result   <= ex_link_addr; -- Pc+4
-                ex_branch_addr  <= std_logic_vector((unsigned(id_ex_reg1) + unsigned(id_ex_imm)));
+                --jalr
+                ex_alu_result <= ex_link_addr; -- Pc+4
+                ex_branch_addr <= std_logic_vector((unsigned(id_ex_reg1) + unsigned(id_ex_imm)));
                 ex_branch_taken <= '1';
 
             -- load upper imm
             when "0110111" =>
                 --lui
                 ex_alu_result <= id_ex_imm;
+              
 
             -- add uper imm to pc
             when "0010111" =>
                 --auipc
-                ex_alu_result <= std_logic_vector(unsigned(id_ex_pc) + unsigned(id_ex_imm));
+                ex_alu_result <= std_logic_vector(unsigned(id_ex_pc)+unsigned(id_ex_imm));
 
             when others =>
                 null;
         end case;
     end process;
 
-   
+    process(clk)
+    begin    
+        if rising_edge(clk) then 
+            ex_mem_instr <= id_ex_instr;
+            ex_mem_alu <= ex_alu_result;
+            ex_mem_reg2 <= id_ex_reg2;
+            ex_mem_rd <= id_ex_rd;
+            ex_mem_funct3 <= id_ex_funct3;
+            ex_mem_regwrite <= id_ex_regwrite;
+            ex_mem_memread <= id_ex_memread;
+            ex_mem_memwrite <= id_ex_memwrite;
+            ex_mem_memtoreg <= id_ex_memtoreg;
+            ex_mem_branch_taken <= ex_branch_taken;
+            ex_mem_branch_addr <= ex_branch_addr;
+        end if;
+    end process;
+
+    --MISSING MEMORY STAGE
+
+    process(Clk)
+    begin 
+        if rising_edge(clk) then 
+            mem_wb_instr <= ex_mem_instr;
+            mem_wb_alu <= ex_mem_alu;
+            mem_wb_mem <= mem_load_data;
+            mem_wb_rd <= ex_mem_rd;
+            mem_wb_regwrite <= ex_mem_regwrite;
+            mem_wb_memtoreg <= ex_mem_memtoreg;
+        end if;
+    end process;
+
+    --writeback process 
     wb_data <= mem_wb_mem when mem_wb_memtoreg = '1' else mem_wb_alu;
 
-
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if mem_wb_regwrite = '1' and mem_wb_rd /= 0 then --x0 should stay 0
+                reg_file(mem_wb_rd) <= wb_data;
+            end if;
+            reg_file(0) <= (others => '0');
+        end if;
+    end process;
 
 end architecture;
