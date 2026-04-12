@@ -114,16 +114,16 @@ begin
         readline(program, line_buf);
         if line_buf'length > 0 then
           read(line_buf, instr);
-          
+
           ld_imem_addr  <= word_address;
           ld_imem_data  <= instr;
-		ld_imem_write <= '1';
+		  ld_imem_write <= '1';
 
           wait until rising_edge(clk);
-	  wait until rising_edge(clk);
-	  ld_imem_write <= '0';
-	  wait until rising_edge(clk);
-	
+	      wait until rising_edge(clk);
+	      ld_imem_write <= '0';
+	      wait until rising_edge(clk);
+
           word_address  := word_address + 1;
         end if;
       end loop;
@@ -149,16 +149,22 @@ begin
       wait;
     end process;
 
+    -- process (sim_finished) begin
+    --     if (sim_finished = '1') then
+    --         stop;
+    --     end if;
+    -- end process;
+
     -- NOTE: data memory dump is handled by testbench.tcl which can access
     -- sim:/processor_tb/dut/data_mem/ram_block directly after run -all
 
     -- Writes final contents from register file into text file
-    process 
+    process
       file registers : text open write_mode is "register_file.txt";
       variable line_buf : line;
     begin
       wait until sim_finished = '1';
-      
+
       for i in reg_file'range loop
         write(line_buf, reg_file(i));
         writeline(registers, line_buf);

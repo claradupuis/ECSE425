@@ -1,29 +1,5 @@
-main:
-    addi  a0, zero, 5       # set n = 5
-    jal   fact              # jump and link
-
-stop: 
-    j     stop              # infinite loop
-
-# Compute and return factorial
-# pre:  a0 = n
-# post: a0 = n!
-
-# a = 1;
-# for (i=n; i>=2; i--)
-#   a = a*i;
-# return a;
-
-fact:
-    add   t0, zero, a0      # move argument to temporary
-    addi  a0, zero, 1       # initialize return value to 1
-
-fact_l:
-    slti  t1, t0, 2         # t1 = t0<2 ? 1 : 0
-    bne   t1, zero, done    # if i<2, we're done!
-    mul   a0, a0, t0        
-    addi  t0, t0, -1        # i--
-    jal   zero, fact_l      # jump to loop
-
-done:
-    jalr  zero, ra, 0       # return
+01000000001100001000000100110011
+00000000010100010111011000110011
+00000000001000110110011010110011
+00000000001000010000011100110011
+00000110111100010010001000100011

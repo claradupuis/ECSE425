@@ -12,7 +12,7 @@ ENTITY memory IS
 	PORT (
 		clock: IN STD_LOGIC;
 		writedata: IN STD_LOGIC_VECTOR (31 DOWNTO 0);
-		address: IN INTEGER RANGE 0 TO ram_size-1;
+		address: IN INTEGER RANGE 0 TO (ram_size/4)-1;
 		memwrite: IN STD_LOGIC;
 		memread: IN STD_LOGIC;
 		readdata: OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
@@ -23,7 +23,7 @@ END memory;
 ARCHITECTURE rtl OF memory IS
 	TYPE MEM IS ARRAY(ram_size/4-1 downto 0) OF STD_LOGIC_VECTOR(31 DOWNTO 0);
 	SIGNAL ram_block: MEM;
-	SIGNAL read_address_reg: INTEGER RANGE 0 to ram_size-1;
+	SIGNAL read_address_reg: INTEGER RANGE 0 to (ram_size/4)-1;
 	SIGNAL write_waitreq_reg: STD_LOGIC := '1';
 	SIGNAL read_waitreq_reg: STD_LOGIC := '1';
 BEGIN

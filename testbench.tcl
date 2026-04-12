@@ -1,6 +1,13 @@
 proc AddWaves {} {
     add wave -position end sim:/processor_tb/clk
     add wave -position end sim:/processor_tb/reset
+    add wave -position end sim:/processor_tb/dut/currently_stalled
+    add wave -position end sim:/processor_tb/dut/id_rs1
+    add wave -position end sim:/processor_tb/dut/id_rs2
+    add wave -position end sim:/processor_tb/dut/id_ex_rd
+    add wave -position end sim:/processor_tb/dut/ex_mem_rd
+    add wave -position end sim:/processor_tb/dut/mem_wb_rd
+    add wave -position end sim:/processor_tb/dut/if_id_instr
 
     ;# Optional internal signals
     add wave -position end sim:/processor_tb/dut/pc

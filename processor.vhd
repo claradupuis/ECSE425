@@ -53,17 +53,17 @@ ARCHITECTURE behaviour of processor is
     -- type reg_array_t is array (0 to 31) of std_logic_vector(31 downto 0);
     type mem_word_array_t is array (0 to 8191) of std_logic_vector(31 downto 0);
     signal reg_file : reg_array_t := (others => (others => '0')); --sets all to 0 i think
-    
+
     --pc
     signal pc : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
     signal pc_next  : std_logic_vector(31 downto 0) := (others => '0');
     signal instr_if : std_logic_vector(31 downto 0) := (others => '0');
-    
 
-    -- instruction memory 
+
+    -- instruction memory
     signal imem_writedata : std_logic_vector(31 downto 0);
     signal imem_readdata : std_logic_vector(31 downto 0);
-    signal imem_address : integer range 0 to 8191 := 0; 
+    signal imem_address : integer range 0 to 8191 := 0;
     signal imem_memwrite : std_logic := '0';
     signal imem_memread : std_logic := '0';
     signal imem_waitrequest : std_logic;
@@ -76,13 +76,13 @@ ARCHITECTURE behaviour of processor is
     signal dmem_memread : std_logic := '0';
     signal dmem_waitrequest : std_logic;
 
-   
+
 
     --IF/ID pipeline
     signal if_id_pc : std_logic_vector(31 downto 0) := (others => '0');
     signal if_id_instr : std_logic_vector(31 downto 0) := (others => '0');
-    
-    -- Decode 
+
+    -- Decode
     signal id_rs1 : integer range 0 to 31;
     signal id_rs2 : integer range 0 to 31;
     signal id_rd : integer range 0 to 31;
@@ -156,6 +156,11 @@ ARCHITECTURE behaviour of processor is
     --writeback
     signal wb_data : std_logic_vector(31 downto 0);
 
+    --stall detection
+    signal currently_stalled: std_logic := '0';
+    signal stalled_instr: std_logic_vector(31 downto 0) := (others => '0');
+    signal stalled_pc: std_logic_vector(31 downto 0) := (others => '0');
+
     function sign_extend(inp : std_logic_vector; out_size:integer) return std_logic_vector is
     variable result : std_logic_vector(out_size-1 downto 0);
     begin
@@ -171,7 +176,7 @@ ARCHITECTURE behaviour of processor is
         result(inp'length-1 downto 0) := inp;
         return result;
     end function;
-    
+
 
 begin
     instruction_mem : entity work.memory
@@ -205,7 +210,7 @@ begin
             readdata    => dmem_readdata,
             waitrequest => dmem_waitrequest
         );
-    
+
     imem_address  <= ld_imem_addr  when ld_imem_write = '1' else to_integer(unsigned(pc(14 downto 2)));
     imem_memread  <= '0'           when ld_imem_write = '1' else '1';
     imem_memwrite <= ld_imem_write;
@@ -213,7 +218,8 @@ begin
 
     instr_if <= imem_readdata;
     pc_next <= ex_mem_branch_addr when ex_mem_branch_taken = '1'
-               else std_logic_vector(unsigned(pc) + 4);
+        else pc when currently_stalled = '1'
+        else std_logic_vector(unsigned(pc) + 4);
 
     process(clk)
     begin
@@ -222,6 +228,8 @@ begin
                 pc       <= (others => '0');
                 if_id_pc    <= (others => '0');
                 if_id_instr <= (others => '0');
+            elsif currently_stalled = '1' then
+                if_id_instr <= "00000000000000000000000000010011";
             elsif ex_mem_branch_taken = '1' then
                 pc       <= ex_mem_branch_addr;
                 if_id_pc    <= (others => '0');
@@ -243,13 +251,13 @@ begin
 
     id_reg1 <= reg_file(id_rs1); -- used later in EX stage for operations
     id_reg2 <= reg_file(id_rs2);
-    
+
     reg_file(0) <= (others => '0');
 
     -- connect debug ports to signals
     dbg_imem_writedata <= imem_writedata;
     dbg_imem_readdata   <= imem_readdata;
-    dbg_imem_address <= imem_address;  
+    dbg_imem_address <= imem_address;
     dbg_imem_memwrite <= imem_memwrite;
     dbg_imem_memread <= imem_memread;
     dbg_imem_waitrequest <= imem_waitrequest;
@@ -261,6 +269,23 @@ begin
     dbg_dmem_waitrequest <= dmem_waitrequest;
     dbg_reg_file <= reg_file;
 
+    --hazard detection
+    process(pc, id_ex_rd, ex_mem_rd, mem_wb_rd)
+    begin
+        if reset = '1' then
+            currently_stalled <= '0';
+        elsif  ((id_rs1 = id_ex_rd or
+            id_rs2 = id_ex_rd) and id_ex_rd /= 0) or
+            ((id_rs1 = ex_mem_rd or
+            id_rs2 = ex_mem_rd) and ex_mem_rd /= 0 ) or
+            ((id_rs1 = mem_wb_rd or
+            id_rs2 = mem_wb_rd) and mem_wb_rd /= 0)
+        then
+            currently_stalled <= '1';
+        else
+            currently_stalled <= '0';
+        end if;
+    end process;
 
     process(if_id_instr, id_opcode)
     begin
@@ -280,7 +305,7 @@ begin
                     if_id_instr(7) &
                     if_id_instr(30 downto 25) &
                     if_id_instr(11 downto 8) &
-                    '0', 32); 
+                    '0', 32);
 
             -- U-type
             when "0110111" | "0010111" =>
@@ -298,7 +323,7 @@ begin
         end case;
     end process;
 
-    -- when the opcode changes, the processor needs to decide what it will do 
+    -- when the opcode changes, the processor needs to decide what it will do
     process(id_opcode)
     begin
         id_regwrite <= '0';
@@ -310,7 +335,7 @@ begin
         id_jump <= '0';
 
         case id_opcode is
-            -- R-type --> Write a result and use two registers 
+            -- R-type --> Write a result and use two registers
             when "0110011" =>
                 id_regwrite <= '1';
                 id_alu_use_imm <= '0';
@@ -320,7 +345,7 @@ begin
                 id_regwrite <= '1';
                 id_alu_use_imm <= '1';
 
-            -- lw --> read memory, write result to register 
+            -- lw --> read memory, write result to register
             when "0000011" =>
                 id_regwrite <= '1';
                 id_memread <= '1';
@@ -409,7 +434,7 @@ begin
 
     --choose the ALU input (register or imm)
     ex_alu_in2 <= id_ex_reg2 when id_ex_alu_use_imm = '0' else id_ex_imm;
-    
+
 
     --EXE stage
     process(id_ex_reg1, id_ex_reg2, ex_alu_in2, id_ex_instr, id_ex_funct3, id_ex_funct7, id_ex_pc, id_ex_imm)
@@ -431,7 +456,7 @@ begin
                     when "000" =>
                         if id_ex_funct7 = "0000000" then
                             --add
-                            ex_alu_result <= std_logic_vector(signed(id_ex_reg1) + signed(ex_alu_in2)); 
+                            ex_alu_result <= std_logic_vector(signed(id_ex_reg1) + signed(ex_alu_in2));
 
                         elsif id_ex_funct7 = "0100000" then
                             --sub
@@ -440,13 +465,13 @@ begin
                         elsif id_ex_funct7 = "0000001" then
                             --mul REVIEEEEEEWWW THISSSSSS
     			    -- want the lower 32 bits
-                            ex_alu_result <= std_logic_vector(resize(signed(id_ex_reg1) * signed(ex_alu_in2), 32)); 
+                            ex_alu_result <= std_logic_vector(resize(signed(id_ex_reg1) * signed(ex_alu_in2), 32));
 
                         end if;
-                    
+
                         when "110" =>
                         --or
-                        ex_alu_result <= id_ex_reg1 or ex_alu_in2; 
+                        ex_alu_result <= id_ex_reg1 or ex_alu_in2;
 
                     when "111" =>
                         -- and
@@ -455,15 +480,15 @@ begin
 
                     when "001" =>
                         --sll
-                        ex_alu_result <= std_logic_vector(shift_left(unsigned(id_ex_reg1), shift_amount)); 
+                        ex_alu_result <= std_logic_vector(shift_left(unsigned(id_ex_reg1), shift_amount));
 
                     when "101" =>
                         if id_ex_funct7 = "0000000" then
                             --srl
-                            ex_alu_result <= std_logic_vector(shift_right(unsigned(id_ex_reg1), shift_amount)); 
+                            ex_alu_result <= std_logic_vector(shift_right(unsigned(id_ex_reg1), shift_amount));
                         elsif id_ex_funct7 = "0100000" then
                             -- sra
-                            ex_alu_result <= std_logic_vector(shift_right(signed(id_ex_reg1), shift_amount)); 
+                            ex_alu_result <= std_logic_vector(shift_right(signed(id_ex_reg1), shift_amount));
                         end if;
 
                     when others =>
@@ -475,11 +500,11 @@ begin
                 case id_ex_funct3 is
                     when "000" =>
                         --addi
-                        ex_alu_result <= std_logic_vector(signed(id_ex_reg1) + signed(ex_alu_in2)); 
+                        ex_alu_result <= std_logic_vector(signed(id_ex_reg1) + signed(ex_alu_in2));
 
                     when "100" =>
                         --xori
-                        ex_alu_result <= id_ex_reg1 xor ex_alu_in2; 
+                        ex_alu_result <= id_ex_reg1 xor ex_alu_in2;
 
                     when "110" =>
                         --ori
@@ -487,7 +512,7 @@ begin
 
                     when "111" =>
                         -- andi
-                        ex_alu_result <= id_ex_reg1 and ex_alu_in2; 
+                        ex_alu_result <= id_ex_reg1 and ex_alu_in2;
 
                     when "010" =>
                         --slti
@@ -495,7 +520,7 @@ begin
                             ex_alu_result <= x"00000001";
                         else
                             ex_alu_result <= x"00000000";
-                        end if; 
+                        end if;
 
                     when others =>
                         null;
@@ -512,15 +537,15 @@ begin
                 case id_ex_funct3 is
                     when "000" =>
                         --beq
-                        if id_ex_reg1 = id_ex_reg2 then ex_branch_taken <= '1'; end if; 
+                        if id_ex_reg1 = id_ex_reg2 then ex_branch_taken <= '1'; end if;
 
                     when "001" =>
                         --bne
-                        if id_ex_reg1 /= id_ex_reg2 then ex_branch_taken <= '1'; end if; 
+                        if id_ex_reg1 /= id_ex_reg2 then ex_branch_taken <= '1'; end if;
 
                     when "100" =>
                         --blt
-                        if signed(id_ex_reg1) < signed(id_ex_reg2) then ex_branch_taken <= '1'; end if; 
+                        if signed(id_ex_reg1) < signed(id_ex_reg2) then ex_branch_taken <= '1'; end if;
 
                     when "101" =>
                         --bge
@@ -548,7 +573,7 @@ begin
             when "0110111" =>
                 --lui
                 ex_alu_result <= id_ex_imm;
-              
+
 
             -- add uper imm to pc
             when "0010111" =>
@@ -603,14 +628,14 @@ begin
         mem_load_data <= (others => '0');
 
         word_data := dmem_readdata;
-        
-       
+
+
         if ex_mem_memread = '1' and ex_mem_funct3 = "010" then
                 --load word
                 mem_load_data <= word_data;
         end if;
 
-        if ex_mem_memwrite = '1' and ex_mem_funct3 = "010" then 
+        if ex_mem_memwrite = '1' and ex_mem_funct3 = "010" then
             -- store word
             dmem_writedata <= ex_mem_reg2;
         end if;
@@ -637,7 +662,7 @@ begin
         end if;
     end process;
 
-    --writeback process 
+    --writeback process
     wb_data <= mem_wb_mem when mem_wb_memtoreg = '1' else mem_wb_alu;
 
     process(clk)
