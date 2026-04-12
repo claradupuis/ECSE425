@@ -2,6 +2,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.textio.all;
+use ieee.std_logic_textio.all;
 use work.types.all;
 
 entity processor_tb is
@@ -59,8 +60,6 @@ ARCHITECTURE behaviour OF processor_tb IS
     signal loading_finished : std_logic := '0';
     signal sim_finished : std_logic := '0';
 
-type char_file_t is file of character;
-
 begin
     dut: entity work.processor
         port map (
@@ -91,50 +90,46 @@ begin
     -- clock
     clk_process : process
     begin
-        while true loop
+        while sim_finished = '0' loop
             clk <= '0';
             wait for 0.5 ns;
             clk <= '1';
             wait for 0.5 ns;
         end loop;
+        wait;
     end process;
 
-    -- Read program.txt (raw binary) into instruction memory via ld_imem_* ports.
+    -- Read program.txt (one 32-bit binary string per line) into instruction memory.
     -- reset is held high during loading so the pipeline stays flushed.
     process
-      variable char_buffer  : character;
-      variable word_buffer  : std_logic_vector(31 downto 0);
-      variable byte_index   : integer range 0 to 3 := 0;
+      file program      : text open read_mode is "program.txt";
+      variable line_buf : line;
+      variable instr    : std_logic_vector(31 downto 0);
       variable word_address : integer := 0;
-      file program : char_file_t open read_mode is "program.txt";
     begin
       reset         <= '1';
       ld_imem_write <= '0';
-      byte_index    := 0;
-      word_buffer   := (others => '0');
 
       while not ENDFILE(program) loop
-        read(program, char_buffer);
-
-        word_buffer(((byte_index + 1) * 8) - 1 downto byte_index * 8) :=
-            std_logic_vector(TO_UNSIGNED(character'pos(char_buffer), 8));
-
-        byte_index := byte_index + 1;
-
-        if byte_index = 4 then
-          ld_imem_write <= '1';
+        readline(program, line_buf);
+        if line_buf'length > 0 then
+          read(line_buf, instr);
+          
           ld_imem_addr  <= word_address;
-          ld_imem_data  <= word_buffer;
-          wait until rising_edge(clk);
+          ld_imem_data  <= instr;
+		ld_imem_write <= '1';
 
-          word_address := word_address + 1;
-          byte_index   := 0;
-          word_buffer  := (others => '0');
+          wait until rising_edge(clk);
+	  wait until rising_edge(clk);
+	  ld_imem_write <= '0';
+	  wait until rising_edge(clk);
+	
+          word_address  := word_address + 1;
         end if;
       end loop;
 
-      ld_imem_write   <= '0';
-      reset           <= '0';
+      ld_imem_write    <= '0';
+      reset            <= '0';
       loading_finished <= '1';
       wait;
     end process;
@@ -155,9 +150,9 @@ begin
     end process;
 
     -- NOTE: data memory dump is handled by testbench.tcl which can access
-    -- sim:/processor_tb/dut/data_mem/ram_block directly after run -all.
+    -- sim:/processor_tb/dut/data_mem/ram_block directly after run -all
 
-    -- Writes final contents from register file into " w"
+    -- Writes final contents from register file into text file
     process 
       file registers : text open write_mode is "register_file.txt";
       variable line_buf : line;
@@ -170,12 +165,4 @@ begin
       end loop;
     end process;
 
-    -- reset
-    reset_process : process
-    begin
-        reset <= '1';
-        wait for 5 ns;
-        reset <= '0';
-        wait;
-    end process;
 end;
