@@ -11,11 +11,11 @@ ENTITY memory IS
 	);
 	PORT (
 		clock: IN STD_LOGIC;
-		writedata: IN STD_LOGIC_VECTOR (7 DOWNTO 0);
+		writedata: IN STD_LOGIC_VECTOR (31 DOWNTO 0);
 		address: IN INTEGER RANGE 0 TO ram_size-1;
 		memwrite: IN STD_LOGIC;
 		memread: IN STD_LOGIC;
-		readdata: OUT STD_LOGIC_VECTOR (7 DOWNTO 0);
+		readdata: OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
 		waitrequest: OUT STD_LOGIC
 	);
 END memory;
@@ -32,7 +32,7 @@ BEGIN
 	BEGIN
 		--This is a cheap trick to initialize the SRAM in simulation
 		IF(now < 1 ps)THEN
-			For i in 0 to ram_size-1 LOOP
+			For i in 0 to ram_size/4-1 LOOP
 				ram_block(i) <= std_logic_vector(to_unsigned(i mod 256, 32));
 			END LOOP;
 		end if;

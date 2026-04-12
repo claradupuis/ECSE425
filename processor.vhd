@@ -259,6 +259,7 @@ begin
     dbg_dmem_memwrite    <= dmem_memwrite;
     dbg_dmem_memread     <= dmem_memread;
     dbg_dmem_waitrequest <= dmem_waitrequest;
+    dbg_reg_file <= reg_file;
 
 
     process(if_id_instr, id_opcode)
@@ -438,7 +439,8 @@ begin
 
                         elsif id_ex_funct7 = "0000001" then
                             --mul REVIEEEEEEWWW THISSSSSS
-                            ex_alu_result <= std_logic_vector(signed(id_ex_reg1) * signed(ex_alu_in2)); 
+    			    -- want the lower 32 bits
+                            ex_alu_result <= std_logic_vector(resize(signed(id_ex_reg1) * signed(ex_alu_in2), 32)); 
 
                         end if;
                     
@@ -449,6 +451,7 @@ begin
                     when "111" =>
                         -- and
                         ex_alu_result <= id_ex_reg1 and ex_alu_in2;
+
 
                     when "001" =>
                         --sll
@@ -593,6 +596,7 @@ begin
     process(ex_mem_alu, ex_mem_reg2, ex_mem_memread, ex_mem_memwrite, ex_mem_funct3, dmem_readdata)
         variable word_data : std_logic_vector(31 downto 0);
     begin
+        dmem_address  <= to_integer(unsigned(ex_mem_alu(14 downto 2)));
         dmem_memread  <= ex_mem_memread;
         dmem_memwrite <= ex_mem_memwrite;
         dmem_writedata <= ex_mem_reg2;

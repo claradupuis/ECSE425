@@ -3,9 +3,13 @@ proc AddWaves {} {
     add wave -position end sim:/processor_tb/reset
 
     ;# Optional internal signals
-    ;# add wave -position end sim:/processor_tb/dut/pc
+    add wave -position end sim:/processor_tb/dut/pc
     ;# add wave -position end sim:/processor_tb/dut/instruction_mem/address
-    ;# add wave -position end sim:/processor_tb/dut/data_mem/address
+    add wave -position end sim:/processor_tb/dut/data_mem/address
+    add wave -position end sim:/processor_tb/imem_readdata
+    add wave -position end sim:/processor_tb/reset
+    add wave -position end sim:/processor_tb/dut/if_id_instr
+    add wave -position end sim:/processor_tb/dut/ex_mem_memwrite
 }
 
 vlib work
@@ -31,4 +35,3 @@ for {set i 0} {$i < 8192} {incr i} {
 }
 close $mem_file
 
-quit -f
