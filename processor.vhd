@@ -9,19 +9,23 @@ ENTITY processor IS
     PORT (
         clk : in std_logic;
         reset : in std_logic;
-        dbg_imem_writedata   : out std_logic_vector(7 downto 0);
-        dbg_imem_readdata    : out std_logic_vector(7 downto 0);
+        dbg_imem_writedata   : out std_logic_vector(31 downto 0);
+        dbg_imem_readdata    : out std_logic_vector(31 downto 0);
         dbg_imem_address     : out integer range 0 to 32767;
         dbg_imem_memwrite    : out std_logic;
         dbg_imem_memread     : out std_logic;
         dbg_imem_waitrequest : out std_logic;
-        dbg_dmem_writedata   : out std_logic_vector(7 downto 0);
-        dbg_dmem_readdata    : out std_logic_vector(7 downto 0);
+        dbg_dmem_writedata   : out std_logic_vector(31 downto 0);
+        dbg_dmem_readdata    : out std_logic_vector(31 downto 0);
         dbg_dmem_address     : out integer range 0 to 32767;
         dbg_dmem_memwrite    : out std_logic;
         dbg_dmem_waitrequest : out std_logic;
         dbg_dmem_memread     : out std_logic;
-        dbg_reg_file : out reg_array_t
+        dbg_reg_file : out reg_array_t;
+        -- Instruction memory loader (driven by testbench to load program)
+        ld_imem_addr  : in integer range 0 to 8191;
+        ld_imem_data  : in std_logic_vector(31 downto 0);
+        ld_imem_write : in std_logic
     );
 end entity;
 
@@ -35,8 +39,8 @@ ARCHITECTURE behaviour of processor is
         );
         PORT (
             clock: IN STD_LOGIC;
-            writedata: IN STD_LOGIC_VECTOR (7 DOWNTO 0);
-            address: IN INTEGER RANGE 0 TO ram_size-1;
+            writedata: IN STD_LOGIC_VECTOR (31 DOWNTO 0);
+            address: IN INTEGER RANGE 0 TO (ram_size/4)-1;
             memwrite: IN STD_LOGIC;
             memread: IN STD_LOGIC;
             readdata: OUT STD_LOGIC_VECTOR (7 DOWNTO 0);
@@ -49,7 +53,6 @@ ARCHITECTURE behaviour of processor is
     -- type reg_array_t is array (0 to 31) of std_logic_vector(31 downto 0);
     type mem_word_array_t is array (0 to 8191) of std_logic_vector(31 downto 0);
     signal reg_file : reg_array_t := (others => (others => '0')); --sets all to 0 i think
-    signal instr_mem : mem_word_array_t := (others => (others => '0'));
     
     --pc
     signal pc : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
@@ -58,17 +61,17 @@ ARCHITECTURE behaviour of processor is
     
 
     -- instruction memory 
-    signal imem_writedata : std_logic_vector(7 downto 0);
-    signal imem_readdata : std_logic_vector(7 downto 0);
-    signal imem_address : integer range 0 to 32767; 
+    signal imem_writedata : std_logic_vector(31 downto 0);
+    signal imem_readdata : std_logic_vector(31 downto 0);
+    signal imem_address : integer range 0 to 8191 := 0; 
     signal imem_memwrite : std_logic := '0';
     signal imem_memread : std_logic := '0';
     signal imem_waitrequest : std_logic;
 
     -- data memory
-    signal dmem_writedata : std_logic_vector(7 downto 0) := (others => '0');
-    signal dmem_readdata : std_logic_vector(7 downto 0);
-    signal dmem_address : integer range 0 to 32767 := 0;
+    signal dmem_writedata : std_logic_vector(31 downto 0) := (others => '0');
+    signal dmem_readdata : std_logic_vector(31 downto 0);
+    signal dmem_address : integer range 0 to 8191 := 0;
     signal dmem_memwrite : std_logic := '0';
     signal dmem_memread : std_logic := '0';
     signal dmem_waitrequest : std_logic;
@@ -153,10 +156,18 @@ ARCHITECTURE behaviour of processor is
     --writeback
     signal wb_data : std_logic_vector(31 downto 0);
 
-    function sign_extend(inp : std_logic_vector; out_size : integer) return std_logic_vector is
+    function sign_extend(inp : std_logic_vector; out_size:integer) return std_logic_vector is
     variable result : std_logic_vector(out_size-1 downto 0);
     begin
         result := (others => inp(inp'left));
+        result(inp'length-1 downto 0) := inp;
+        return result;
+    end function;
+
+    function zero_extend(inp:std_logic_vector; out_size:integer) return std_logic_vector is
+    variable result:std_logic_vector(out_size-1 downto 0);
+    begin
+        result := (others => '0');
         result(inp'length-1 downto 0) := inp;
         return result;
     end function;
@@ -195,20 +206,29 @@ begin
             waitrequest => dmem_waitrequest
         );
     
-    instr_if <= instr_mem(to_integer(unsigned(pc(14 downto 2))));
+    imem_address  <= ld_imem_addr  when ld_imem_write = '1' else to_integer(unsigned(pc(14 downto 2)));
+    imem_memread  <= '0'           when ld_imem_write = '1' else '1';
+    imem_memwrite <= ld_imem_write;
+    imem_writedata <= ld_imem_data when ld_imem_write = '1' else (others => '0');
 
+    instr_if <= imem_readdata;
     pc_next <= ex_mem_branch_addr when ex_mem_branch_taken = '1'
                else std_logic_vector(unsigned(pc) + 4);
 
     process(clk)
     begin
         if rising_edge(clk) then
-            pc <= pc_next;
-            if ex_mem_branch_taken = '1' then
-                if_id_pc <= (others => '0');
-                if_id_instr <= x"00000000";
+            if reset = '1' then
+                pc       <= (others => '0');
+                if_id_pc    <= (others => '0');
+                if_id_instr <= (others => '0');
+            elsif ex_mem_branch_taken = '1' then
+                pc       <= ex_mem_branch_addr;
+                if_id_pc    <= (others => '0');
+                if_id_instr <= x"00000011";
             else
-                if_id_pc <= pc;
+                pc       <= pc_next;
+                if_id_pc    <= pc;
                 if_id_instr <= instr_if;
             end if;
         end if;
@@ -345,23 +365,43 @@ begin
    process(clk)
     begin
         if rising_edge(clk) then
-            id_ex_pc <= if_id_pc;
-            id_ex_instr <= if_id_instr;
-            id_ex_reg1 <= id_reg1;
-            id_ex_reg2 <= id_reg2;
-            id_ex_imm <= id_imm;
-            id_ex_rs1 <= id_rs1;
-            id_ex_rs2 <= id_rs2;
-            id_ex_rd <= id_rd;
-            id_ex_funct3 <= id_funct3;
-            id_ex_funct7 <= id_funct7;
-            id_ex_regwrite <= id_regwrite;
-            id_ex_memread <= id_memread;
-            id_ex_memwrite <= id_memwrite;
-            id_ex_memtoreg <= id_memtoreg;
-            id_ex_alu_use_imm <= id_alu_use_imm;
-            id_ex_branch <= id_branch;
-            id_ex_jump <= id_jump;
+            if reset = '1' then
+                id_ex_pc          <= (others => '0');
+                id_ex_instr       <= (others => '0');
+                id_ex_reg1        <= (others => '0');
+                id_ex_reg2        <= (others => '0');
+                id_ex_imm         <= (others => '0');
+                id_ex_rs1         <= 0;
+                id_ex_rs2         <= 0;
+                id_ex_rd          <= 0;
+                id_ex_funct3      <= (others => '0');
+                id_ex_funct7      <= (others => '0');
+                id_ex_regwrite    <= '0';
+                id_ex_memread     <= '0';
+                id_ex_memwrite    <= '0';
+                id_ex_memtoreg    <= '0';
+                id_ex_alu_use_imm <= '0';
+                id_ex_branch      <= '0';
+                id_ex_jump        <= '0';
+            else
+                id_ex_pc          <= if_id_pc;
+                id_ex_instr       <= if_id_instr;
+                id_ex_reg1        <= id_reg1;
+                id_ex_reg2        <= id_reg2;
+                id_ex_imm         <= id_imm;
+                id_ex_rs1         <= id_rs1;
+                id_ex_rs2         <= id_rs2;
+                id_ex_rd          <= id_rd;
+                id_ex_funct3      <= id_funct3;
+                id_ex_funct7      <= id_funct7;
+                id_ex_regwrite    <= id_regwrite;
+                id_ex_memread     <= id_memread;
+                id_ex_memwrite    <= id_memwrite;
+                id_ex_memtoreg    <= id_memtoreg;
+                id_ex_alu_use_imm <= id_alu_use_imm;
+                id_ex_branch      <= id_branch;
+                id_ex_jump        <= id_jump;
+            end if;
         end if;
     end process;
 
@@ -518,33 +558,78 @@ begin
     end process;
 
     process(clk)
-    begin    
-        if rising_edge(clk) then 
-            ex_mem_instr <= id_ex_instr;
-            ex_mem_alu <= ex_alu_result;
-            ex_mem_reg2 <= id_ex_reg2;
-            ex_mem_rd <= id_ex_rd;
-            ex_mem_funct3 <= id_ex_funct3;
-            ex_mem_regwrite <= id_ex_regwrite;
-            ex_mem_memread <= id_ex_memread;
-            ex_mem_memwrite <= id_ex_memwrite;
-            ex_mem_memtoreg <= id_ex_memtoreg;
-            ex_mem_branch_taken <= ex_branch_taken;
-            ex_mem_branch_addr <= ex_branch_addr;
+    begin
+        if rising_edge(clk) then
+            if reset = '1' then
+                ex_mem_instr        <= (others => '0');
+                ex_mem_alu          <= (others => '0');
+                ex_mem_reg2         <= (others => '0');
+                ex_mem_rd           <= 0;
+                ex_mem_funct3       <= (others => '0');
+                ex_mem_regwrite     <= '0';
+                ex_mem_memread      <= '0';
+                ex_mem_memwrite     <= '0';
+                ex_mem_memtoreg     <= '0';
+                ex_mem_branch_taken <= '0';
+                ex_mem_branch_addr  <= (others => '0');
+            else
+                ex_mem_instr        <= id_ex_instr;
+                ex_mem_alu          <= ex_alu_result;
+                ex_mem_reg2         <= id_ex_reg2;
+                ex_mem_rd           <= id_ex_rd;
+                ex_mem_funct3       <= id_ex_funct3;
+                ex_mem_regwrite     <= id_ex_regwrite;
+                ex_mem_memread      <= id_ex_memread;
+                ex_mem_memwrite     <= id_ex_memwrite;
+                ex_mem_memtoreg     <= id_ex_memtoreg;
+                ex_mem_branch_taken <= ex_branch_taken;
+                ex_mem_branch_addr  <= ex_branch_addr;
+            end if;
         end if;
     end process;
 
     --MISSING MEMORY STAGE
 
-    process(Clk)
-    begin 
-        if rising_edge(clk) then 
-            mem_wb_instr <= ex_mem_instr;
-            mem_wb_alu <= ex_mem_alu;
-            mem_wb_mem <= mem_load_data;
-            mem_wb_rd <= ex_mem_rd;
-            mem_wb_regwrite <= ex_mem_regwrite;
-            mem_wb_memtoreg <= ex_mem_memtoreg;
+    process(ex_mem_alu, ex_mem_reg2, ex_mem_memread, ex_mem_memwrite, ex_mem_funct3, dmem_readdata)
+        variable word_data : std_logic_vector(31 downto 0);
+    begin
+        dmem_memread  <= ex_mem_memread;
+        dmem_memwrite <= ex_mem_memwrite;
+        dmem_writedata <= ex_mem_reg2;
+        mem_load_data <= (others => '0');
+
+        word_data := dmem_readdata;
+        
+       
+        if ex_mem_memread = '1' and ex_mem_funct3 = "010" then
+                --load word
+                mem_load_data <= word_data;
+        end if;
+
+        if ex_mem_memwrite = '1' and ex_mem_funct3 = "010" then 
+            -- store word
+            dmem_writedata <= ex_mem_reg2;
+        end if;
+    end process;
+
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            if reset = '1' then
+                mem_wb_instr    <= (others => '0');
+                mem_wb_alu      <= (others => '0');
+                mem_wb_mem      <= (others => '0');
+                mem_wb_rd       <= 0;
+                mem_wb_regwrite <= '0';
+                mem_wb_memtoreg <= '0';
+            else
+                mem_wb_instr    <= ex_mem_instr;
+                mem_wb_alu      <= ex_mem_alu;
+                mem_wb_mem      <= mem_load_data;
+                mem_wb_rd       <= ex_mem_rd;
+                mem_wb_regwrite <= ex_mem_regwrite;
+                mem_wb_memtoreg <= ex_mem_memtoreg;
+            end if;
         end if;
     end process;
 
