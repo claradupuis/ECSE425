@@ -43,7 +43,7 @@ ARCHITECTURE behaviour of processor is
             address: IN INTEGER RANGE 0 TO (ram_size/4)-1;
             memwrite: IN STD_LOGIC;
             memread: IN STD_LOGIC;
-            readdata: OUT STD_LOGIC_VECTOR (7 DOWNTO 0);
+            readdata: OUT STD_LOGIC_VECTOR (31 DOWNTO 0);
             waitrequest: OUT STD_LOGIC
         );
     end COMPONENT;
@@ -228,15 +228,18 @@ begin
                 pc       <= (others => '0');
                 if_id_pc    <= (others => '0');
                 if_id_instr <= (others => '0');
-            elsif currently_stalled = '1' then
-                if_id_instr <= "00000000000000000000000000010011";
             elsif ex_mem_branch_taken = '1' then
                 pc       <= ex_mem_branch_addr;
                 if_id_pc    <= (others => '0');
-                if_id_instr <= x"00000011";
+                if_id_instr <= x"00000013";
+            elsif currently_stalled = '1' then
+                pc <= pc;
+                if_id_pc<= if_id_pc;
+                if_id_instr <= if_id_instr;
+            
             else
-                pc       <= pc_next;
-                if_id_pc    <= pc;
+                pc  <= pc_next;
+                if_id_pc <= pc;
                 if_id_instr <= instr_if;
             end if;
         end if;
@@ -264,8 +267,8 @@ begin
     dbg_dmem_writedata <= dmem_writedata;
     dbg_dmem_readdata <= dmem_readdata;
     dbg_dmem_address  <= dmem_address;
-    dbg_dmem_memwrite    <= dmem_memwrite;
-    dbg_dmem_memread     <= dmem_memread;
+    dbg_dmem_memwrite <= dmem_memwrite;
+    dbg_dmem_memread <= dmem_memread;
     dbg_dmem_waitrequest <= dmem_waitrequest;
     dbg_reg_file <= reg_file;
 
@@ -394,6 +397,26 @@ begin
             if reset = '1' then
                 id_ex_pc          <= (others => '0');
                 id_ex_instr       <= (others => '0');
+                id_ex_reg1        <= (others => '0');
+                id_ex_reg2        <= (others => '0');
+                id_ex_imm         <= (others => '0');
+                id_ex_rs1         <= 0;
+                id_ex_rs2         <= 0;
+                id_ex_rd          <= 0;
+                id_ex_funct3      <= (others => '0');
+                id_ex_funct7      <= (others => '0');
+                id_ex_regwrite    <= '0';
+                id_ex_memread     <= '0';
+                id_ex_memwrite    <= '0';
+                id_ex_memtoreg    <= '0';
+                id_ex_alu_use_imm <= '0';
+                id_ex_branch      <= '0';
+                id_ex_jump        <= '0';
+            
+            --if a branch is taken we flush the wrong data path
+            elsif ex_mem_branch_taken = '1' then
+                id_ex_pc          <= (others => '0');
+                id_ex_instr       <= x"00000013";
                 id_ex_reg1        <= (others => '0');
                 id_ex_reg2        <= (others => '0');
                 id_ex_imm         <= (others => '0');
@@ -566,7 +589,7 @@ begin
             when "1100111" =>
                 --jalr
                 ex_alu_result <= ex_link_addr; -- Pc+4
-                ex_branch_addr <= std_logic_vector((unsigned(id_ex_reg1) + unsigned(id_ex_imm)));
+                ex_branch_addr <= std_logic_vector((unsigned(id_ex_reg1) + unsigned(id_ex_imm))and x"FFFFFFFE");
                 ex_branch_taken <= '1';
 
             -- load upper imm
@@ -619,7 +642,7 @@ begin
     --MISSING MEMORY STAGE
 
     process(ex_mem_alu, ex_mem_reg2, ex_mem_memread, ex_mem_memwrite, ex_mem_funct3, dmem_readdata)
-        variable word_data : std_logic_vector(31 downto 0);
+        
     begin
         dmem_address  <= to_integer(unsigned(ex_mem_alu(14 downto 2)));
         dmem_memread  <= ex_mem_memread;
@@ -627,18 +650,13 @@ begin
         dmem_writedata <= ex_mem_reg2;
         mem_load_data <= (others => '0');
 
-        word_data := dmem_readdata;
 
 
         if ex_mem_memread = '1' and ex_mem_funct3 = "010" then
                 --load word
-                mem_load_data <= word_data;
+                mem_load_data <= dmem_readdata;
         end if;
 
-        if ex_mem_memwrite = '1' and ex_mem_funct3 = "010" then
-            -- store word
-            dmem_writedata <= ex_mem_reg2;
-        end if;
     end process;
 
     process(clk)
