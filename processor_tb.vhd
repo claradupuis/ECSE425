@@ -123,6 +123,7 @@ begin
 	      wait until rising_edge(clk);
 	      ld_imem_write <= '0';
 	      wait until rising_edge(clk);
+	      wait until rising_edge(clk);
 
           word_address  := word_address + 1;
         end if;

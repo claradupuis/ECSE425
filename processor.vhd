@@ -130,6 +130,7 @@ ARCHITECTURE behaviour of processor is
     signal ex_link_addr : std_logic_vector(31 downto 0) := (others => '0');
 
    -- EX/Mem pipeline
+    signal debug_ex_mem_pc: std_logic_vector(31 downto 0) := (others => '0');
     signal ex_mem_instr : std_logic_vector(31 downto 0) := (others => '0');
     signal ex_mem_alu : std_logic_vector(31 downto 0) := (others => '0');
     signal ex_mem_reg2 : std_logic_vector(31 downto 0) := (others => '0');
@@ -217,7 +218,7 @@ begin
     imem_writedata <= ld_imem_data when ld_imem_write = '1' else (others => '0');
 
     instr_if <= imem_readdata;
-    pc_next <= ex_mem_branch_addr when ex_mem_branch_taken = '1'
+    pc_next <= ex_branch_addr when ex_branch_taken = '1'
         else pc when currently_stalled = '1'
         else std_logic_vector(unsigned(pc) + 4);
 
@@ -228,15 +229,14 @@ begin
                 pc       <= (others => '0');
                 if_id_pc    <= (others => '0');
                 if_id_instr <= (others => '0');
-            elsif ex_mem_branch_taken = '1' then
-                pc       <= ex_mem_branch_addr;
+            elsif ex_branch_taken = '1' then
+                pc       <= ex_branch_addr;
                 if_id_pc    <= (others => '0');
                 if_id_instr <= x"00000013";
-            elsif currently_stalled = '1' then
-                pc <= pc;
-                if_id_pc<= if_id_pc;
-                if_id_instr <= if_id_instr;
-            
+            -- elsif currently_stalled = '1' then
+            --     pc <= pc;
+            --     if_id_pc<= if_id_pc;
+            --     if_id_instr <= if_id_instr;
             else
                 pc  <= pc_next;
                 if_id_pc <= pc;
@@ -272,23 +272,23 @@ begin
     dbg_dmem_waitrequest <= dmem_waitrequest;
     dbg_reg_file <= reg_file;
 
-    --hazard detection
-    process(pc, id_ex_rd, ex_mem_rd, mem_wb_rd)
-    begin
-        if reset = '1' then
-            currently_stalled <= '0';
-        elsif  ((id_rs1 = id_ex_rd or
-            id_rs2 = id_ex_rd) and id_ex_rd /= 0) or
-            ((id_rs1 = ex_mem_rd or
-            id_rs2 = ex_mem_rd) and ex_mem_rd /= 0 ) or
-            ((id_rs1 = mem_wb_rd or
-            id_rs2 = mem_wb_rd) and mem_wb_rd /= 0)
-        then
-            currently_stalled <= '1';
-        else
-            currently_stalled <= '0';
-        end if;
-    end process;
+    -- --hazard detection
+    -- process(pc, id_ex_rd, ex_mem_rd, mem_wb_rd)
+    -- begin
+    --     if reset = '1' then
+    --         currently_stalled <= '0';
+    --     elsif  ((id_rs1 = id_ex_rd or
+    --         id_rs2 = id_ex_rd) and id_ex_rd /= 0) or
+    --         ((id_rs1 = ex_mem_rd or
+    --         id_rs2 = ex_mem_rd) and ex_mem_rd /= 0 ) or
+    --         ((id_rs1 = mem_wb_rd or
+    --         id_rs2 = mem_wb_rd) and mem_wb_rd /= 0)
+    --     then
+    --         currently_stalled <= '1';
+    --     else
+    --         currently_stalled <= '0';
+    --     end if;
+    -- end process;
 
     process(if_id_instr, id_opcode)
     begin
@@ -307,8 +307,7 @@ begin
                     if_id_instr(31) &
                     if_id_instr(7) &
                     if_id_instr(30 downto 25) &
-                    if_id_instr(11 downto 8) &
-                    '0', 32);
+                    if_id_instr(11 downto 8), 32);
 
             -- U-type
             when "0110111" | "0010111" =>
@@ -318,8 +317,7 @@ begin
             when "1101111" =>
                 id_imm <= sign_extend( if_id_instr(31) & if_id_instr(19 downto 12) &
                     if_id_instr(20) &
-                    if_id_instr(30 downto 21) &
-                    '0', 32);
+                    if_id_instr(30 downto 21) , 32);
 
             when others =>
                 id_imm <= (others => '0');
@@ -412,11 +410,11 @@ begin
                 id_ex_alu_use_imm <= '0';
                 id_ex_branch      <= '0';
                 id_ex_jump        <= '0';
-            
+
             --if a branch is taken we flush the wrong data path
-            elsif ex_mem_branch_taken = '1' then
+            elsif ex_branch_taken = '1' then
                 id_ex_pc          <= (others => '0');
-                id_ex_instr       <= x"00000013";
+                id_ex_instr       <= (others => '0');
                 id_ex_reg1        <= (others => '0');
                 id_ex_reg2        <= (others => '0');
                 id_ex_imm         <= (others => '0');
@@ -582,7 +580,7 @@ begin
             when "1101111" =>
                 --jal
                 ex_alu_result <= ex_link_addr; --Pc+4
-                ex_branch_addr <= std_logic_vector(unsigned(id_ex_pc) + unsigned(id_ex_imm));
+                ex_branch_addr <= std_logic_vector(unsigned(signed(id_ex_pc)+ signed(id_ex_imm)));
                 ex_branch_taken <= '1';
 
             -- jump and link register
@@ -623,6 +621,20 @@ begin
                 ex_mem_memtoreg     <= '0';
                 ex_mem_branch_taken <= '0';
                 ex_mem_branch_addr  <= (others => '0');
+                debug_ex_mem_pc <= (others => '0');
+            elsif ex_branch_taken = '1' then
+                ex_mem_instr        <= (others => '0');
+                ex_mem_alu          <= (others => '0');
+                ex_mem_reg2         <= (others => '0');
+                ex_mem_rd           <= 0;
+                ex_mem_funct3       <= (others => '0');
+                ex_mem_regwrite     <= '0';
+                ex_mem_memread      <= '0';
+                ex_mem_memwrite     <= '0';
+                ex_mem_memtoreg     <= '0';
+                ex_mem_branch_taken <= '0';
+                ex_mem_branch_addr  <= (others => '0');
+                debug_ex_mem_pc <= (others => '0');
             else
                 ex_mem_instr        <= id_ex_instr;
                 ex_mem_alu          <= ex_alu_result;
@@ -635,6 +647,7 @@ begin
                 ex_mem_memtoreg     <= id_ex_memtoreg;
                 ex_mem_branch_taken <= ex_branch_taken;
                 ex_mem_branch_addr  <= ex_branch_addr;
+                debug_ex_mem_pc <= id_ex_pc;
             end if;
         end if;
     end process;
@@ -642,7 +655,7 @@ begin
     --MISSING MEMORY STAGE
 
     process(ex_mem_alu, ex_mem_reg2, ex_mem_memread, ex_mem_memwrite, ex_mem_funct3, dmem_readdata)
-        
+
     begin
         dmem_address  <= to_integer(unsigned(ex_mem_alu(14 downto 2)));
         dmem_memread  <= ex_mem_memread;
