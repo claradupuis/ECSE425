@@ -233,10 +233,10 @@ begin
                 pc       <= ex_mem_branch_addr;
                 if_id_pc    <= (others => '0');
                 if_id_instr <= x"00000013";
-            -- elsif currently_stalled = '1' then
-            --     pc <= pc;
-            --     if_id_pc<= if_id_pc;
-            --     if_id_instr <= if_id_instr;
+            elsif currently_stalled = '1' then
+                 pc <= pc;
+                 if_id_pc<= if_id_pc;
+                 if_id_instr <= if_id_instr;
             else
                 pc  <= pc_next;
                 if_id_pc <= pc;
@@ -273,22 +273,24 @@ begin
     dbg_reg_file <= reg_file;
 
     -- --hazard detection
-    -- process(pc, id_ex_rd, ex_mem_rd, mem_wb_rd)
-    -- begin
-    --     if reset = '1' then
-    --         currently_stalled <= '0';
-    --     elsif  ((id_rs1 = id_ex_rd or
-    --         id_rs2 = id_ex_rd) and id_ex_rd /= 0) or
-    --         ((id_rs1 = ex_mem_rd or
-    --         id_rs2 = ex_mem_rd) and ex_mem_rd /= 0 ) or
-    --         ((id_rs1 = mem_wb_rd or
-    --         id_rs2 = mem_wb_rd) and mem_wb_rd /= 0)
-    --     then
-    --         currently_stalled <= '1';
-    --     else
-    --         currently_stalled <= '0';
-    --     end if;
-    -- end process;
+    process(reset, ex_mem_branch_taken, id_rs1, id_rs2, id_ex_rd, id_ex_regwrite,
+ex_mem_rd, ex_mem_regwrite, mem_wb_rd, mem_wb_regwrite
+)
+     begin
+         if reset = '1' then
+             currently_stalled <= '0';
+         elsif  ((id_rs1 = id_ex_rd or
+            id_rs2 = id_ex_rd) and id_ex_rd /= 0 and id_ex_regwrite = '1') or
+             ((id_rs1 = ex_mem_rd or
+             id_rs2 = ex_mem_rd) and ex_mem_rd /= 0 and ex_mem_regwrite = '1') 
+          --   ((id_rs1 = mem_wb_rd or
+           --  id_rs2 = mem_wb_rd) and mem_wb_rd /= 0 and mem_wb_regwrite = '1')
+         then
+             currently_stalled <= '1';
+         else
+             currently_stalled <= '0';
+         end if;
+     end process;
 
     process(if_id_instr, id_opcode)
     begin
@@ -430,6 +432,16 @@ begin
                 id_ex_alu_use_imm <= '0';
                 id_ex_branch      <= '0';
                 id_ex_jump        <= '0';
+	    elsif currently_stalled = '1' then
+		-- Freeze IF/ID and then insert bubble between ID/Ex
+	        id_ex_instr <= x"00000013";
+		id_ex_regwrite    <= '0';
+                id_ex_memread     <= '0';
+                id_ex_memwrite    <= '0';
+                id_ex_memtoreg    <= '0';
+                id_ex_branch      <= '0';
+                id_ex_jump        <= '0';
+                id_ex_rd          <= 0;
             else
                 id_ex_pc          <= if_id_pc;
                 id_ex_instr       <= if_id_instr;
