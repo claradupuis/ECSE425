@@ -218,7 +218,7 @@ begin
     imem_writedata <= ld_imem_data when ld_imem_write = '1' else (others => '0');
 
     instr_if <= imem_readdata;
-    pc_next <= ex_branch_addr when ex_branch_taken = '1'
+    pc_next <= ex_mem_branch_addr when ex_mem_branch_taken = '1'
         else pc when currently_stalled = '1'
         else std_logic_vector(unsigned(pc) + 4);
 
@@ -229,8 +229,8 @@ begin
                 pc       <= (others => '0');
                 if_id_pc    <= (others => '0');
                 if_id_instr <= (others => '0');
-            elsif ex_branch_taken = '1' then
-                pc       <= ex_branch_addr;
+            elsif ex_mem_branch_taken = '1' then
+                pc       <= ex_mem_branch_addr;
                 if_id_pc    <= (others => '0');
                 if_id_instr <= x"00000013";
             -- elsif currently_stalled = '1' then
@@ -412,9 +412,9 @@ begin
                 id_ex_jump        <= '0';
 
             --if a branch is taken we flush the wrong data path
-            elsif ex_branch_taken = '1' then
+            elsif ex_mem_branch_taken = '1' then
                 id_ex_pc          <= (others => '0');
-                id_ex_instr       <= (others => '0');
+                id_ex_instr       <= x"00000013";
                 id_ex_reg1        <= (others => '0');
                 id_ex_reg2        <= (others => '0');
                 id_ex_imm         <= (others => '0');
@@ -456,6 +456,8 @@ begin
     --choose the ALU input (register or imm)
     ex_alu_in2 <= id_ex_reg2 when id_ex_alu_use_imm = '0' else id_ex_imm;
 
+--Pc = Pc+4 --> for jal and jalr
+        ex_link_addr <= std_logic_vector(unsigned(id_ex_pc) + 4);
 
     --EXE stage
     process(id_ex_reg1, id_ex_reg2, ex_alu_in2, id_ex_instr, id_ex_funct3, id_ex_funct7, id_ex_pc, id_ex_imm)
@@ -464,9 +466,8 @@ begin
         ex_alu_result <= (others => '0');
         ex_branch_taken <= '0';
         ex_branch_addr <= (others => '0');
+        
 
-        --Pc = Pc+4 --> for jal and jalr
-        ex_link_addr <= std_logic_vector(unsigned(id_ex_pc) + 4);
 
         shift_amount := to_integer(unsigned(ex_alu_in2(4 downto 0)));
 
@@ -622,19 +623,20 @@ begin
                 ex_mem_branch_taken <= '0';
                 ex_mem_branch_addr  <= (others => '0');
                 debug_ex_mem_pc <= (others => '0');
-            elsif ex_branch_taken = '1' then
-                ex_mem_instr        <= (others => '0');
-                ex_mem_alu          <= (others => '0');
-                ex_mem_reg2         <= (others => '0');
-                ex_mem_rd           <= 0;
-                ex_mem_funct3       <= (others => '0');
-                ex_mem_regwrite     <= '0';
-                ex_mem_memread      <= '0';
-                ex_mem_memwrite     <= '0';
-                ex_mem_memtoreg     <= '0';
-                ex_mem_branch_taken <= '0';
-                ex_mem_branch_addr  <= (others => '0');
-                debug_ex_mem_pc <= (others => '0');
+            elsif ex_mem_branch_taken = '1' then
+            -- flush wrong-path instruction currently in EX
+            ex_mem_instr        <= x"00000013";
+            ex_mem_alu          <= (others => '0');
+            ex_mem_reg2         <= (others => '0');
+            ex_mem_rd           <= 0;
+            ex_mem_funct3       <= (others => '0');
+            ex_mem_regwrite     <= '0';
+            ex_mem_memread      <= '0';
+            ex_mem_memwrite     <= '0';
+            ex_mem_memtoreg     <= '0';
+            ex_mem_branch_taken <= '0';
+            ex_mem_branch_addr  <= (others => '0');
+            debug_ex_mem_pc     <= (others => '0');
             else
                 ex_mem_instr        <= id_ex_instr;
                 ex_mem_alu          <= ex_alu_result;
@@ -662,8 +664,6 @@ begin
         dmem_memwrite <= ex_mem_memwrite;
         dmem_writedata <= ex_mem_reg2;
         mem_load_data <= (others => '0');
-
-
 
         if ex_mem_memread = '1' and ex_mem_funct3 = "010" then
                 --load word
