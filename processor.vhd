@@ -282,9 +282,9 @@ ex_mem_rd, ex_mem_regwrite, mem_wb_rd, mem_wb_regwrite
          elsif  ((id_rs1 = id_ex_rd or
             id_rs2 = id_ex_rd) and id_ex_rd /= 0 and id_ex_regwrite = '1') or
              ((id_rs1 = ex_mem_rd or
-             id_rs2 = ex_mem_rd) and ex_mem_rd /= 0 and ex_mem_regwrite = '1') 
-          --   ((id_rs1 = mem_wb_rd or
-           --  id_rs2 = mem_wb_rd) and mem_wb_rd /= 0 and mem_wb_regwrite = '1')
+             id_rs2 = ex_mem_rd) and ex_mem_rd /= 0 and ex_mem_regwrite = '1') or
+             ((id_rs1 = mem_wb_rd or
+             id_rs2 = mem_wb_rd) and mem_wb_rd /= 0 and mem_wb_regwrite = '1')
          then
              currently_stalled <= '1';
          else
