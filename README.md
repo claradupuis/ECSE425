@@ -1,6 +1,6 @@
 # ECSE425 Project
 ## About
-Created as the course project for ECSE425 (Computer Architecture) at McGill University, this is a project that implements a 5-stage pipelined MIPS processor (p4) and a direct mapped cache (p3). 
+Created as the course project for ECSE425 (Computer Architecture) at McGill University, this is a project that implements a 5-stage pipelined RISC-V processor (p4) and a direct mapped cache (p3). Quick note for the actual development of the processor, see the `p4` branch for the commits and debugging that was done.
 
 ## Usage
 For this project, [ModelSim](https://en.wikipedia.org/wiki/ModelSim) was used for development and testing.
