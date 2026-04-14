@@ -1,3 +1,5 @@
+# Helper script to compute the various cases of caching that's needed
+# Author: Tim
 rw = ["read", "write"]
 v = ["valid", "invalid"]
 d = ["dirty", "clean"]
